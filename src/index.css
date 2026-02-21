@@ -1,0 +1,203 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@200..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #25f447;
+  --color-primary-dark: #1ec239;
+  --color-background-light: #f0fdf4;
+  --color-background-dark: #102213;
+  --color-surface-light: #ffffff;
+  --color-surface-dark: #1a2c1d;
+
+  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-body: 'Plus Jakarta Sans', sans-serif;
+
+  --radius: 1rem;
+  --radius-lg: 1.5rem;
+  --radius-xl: 2rem;
+  --radius-2xl: 2.5rem;
+  --radius-3xl: 3rem;
+  --radius-full: 9999px;
+
+  --shadow-clay: 8px 8px 16px rgba(163, 177, 198, 0.4), -8px -8px 16px rgba(255, 255, 255, 0.8), inset 2px 2px 4px rgba(255, 255, 255, 0.5), inset -2px -2px 4px rgba(0, 0, 0, 0.05);
+  --shadow-clay-dark: 8px 8px 16px rgba(0, 0, 0, 0.4), -8px -8px 16px rgba(35, 55, 40, 0.5), inset 2px 2px 4px rgba(255, 255, 255, 0.05), inset -2px -2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-clay-btn: 6px 6px 12px rgba(37, 244, 71, 0.3), -6px -6px 12px rgba(255, 255, 255, 0.5), inset 2px 2px 5px rgba(255, 255, 255, 0.4), inset -2px -2px 5px rgba(0, 0, 0, 0.1);
+}
+
+@layer components {
+  .clay-card {
+    @apply bg-surface-light dark:bg-surface-dark;
+    border-radius: 2rem;
+    box-shadow: 10px 10px 20px rgba(174, 190, 180, 0.2),
+                -10px -10px 20px rgba(255, 255, 255, 0.9),
+                inset 0px -4px 10px rgba(0,0,0,0.02);
+    border: 1px solid rgba(255,255,255,0.8);
+    transition: transform 0.3s ease;
+  }
+
+  .dark .clay-card {
+    background-color: #1a2c1d;
+    box-shadow: 10px 10px 20px rgba(0, 0, 0, 0.4),
+                -5px -5px 15px rgba(40, 60, 45, 0.3),
+                inset 0px -4px 10px rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .clay-card:hover {
+    transform: translateY(-4px);
+  }
+
+  .clay-btn-primary {
+    @apply bg-primary text-[#052e16];
+    box-shadow: 0px 8px 16px rgba(37, 244, 71, 0.25),
+                inset 0px 4px 6px rgba(255, 255, 255, 0.4),
+                inset 0px -4px 6px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .clay-btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0px 12px 20px rgba(37, 244, 71, 0.35),
+                inset 0px 4px 6px rgba(255, 255, 255, 0.4),
+                inset 0px -4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .clay-btn-primary:active {
+    transform: scale(0.98);
+  }
+
+  .clay-input {
+    background-color: #f0f5f1;
+    box-shadow: inset 4px 4px 8px rgba(174, 190, 180, 0.3),
+                inset -4px -4px 8px rgba(255, 255, 255, 0.8);
+  }
+
+  .dark .clay-input {
+    background-color: #152016;
+    box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.4),
+                inset -4px -4px 8px rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+/* Slide-up animation for mobile modal */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+/* Slide-in animation for mobile sidebar */
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.3s ease-out;
+}
+
+/* Slide-in animation for toast */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+/* Scale-in animation for modal */
+@keyframes scale-in {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s ease-out;
+}
+
+/* Slow spin animation for magic circle */
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
+/* Glow pulse animation for crafting effect */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.4),
+                0 0 40px rgba(236, 72, 153, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(168, 85, 247, 0.6),
+                0 0 60px rgba(236, 72, 153, 0.5);
+  }
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}

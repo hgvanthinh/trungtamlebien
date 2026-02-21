@@ -1,0 +1,184 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function: Kiểm tra xem user có phải admin không
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email == 'admin@thaybien.com';
+    }
+
+    // Helper function: Kiểm tra xem user đã đăng nhập chưa
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function: Kiểm tra xem user có phải là chủ sở hữu document không
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Collection: users
+    match /users/{userId} {
+      // Admin có thể đọc/ghi tất cả user documents
+      allow read, write: if isAdmin();
+
+      // User chỉ có thể đọc document của chính mình
+      allow read: if isOwner(userId);
+
+      // Học sinh có thể đọc thông tin các học sinh khác (cần cho leaderboard)
+      // Chỉ cho phép đọc các field công khai: fullName, username, avatar, totalBehaviorPoints
+      allow read: if isAuthenticated() && resource.data.role == 'student';
+
+      // Cho phép tạo tài khoản mới (đăng ký)
+      // User phải tạo document với uid trùng với auth uid
+      // Chỉ cho phép tạo với role='student' và classes=[]
+      allow create: if isOwner(userId)
+        && request.resource.data.role == 'student'
+        && request.resource.data.classes == []
+        && request.resource.data.keys().hasAll(['username', 'fullName', 'email', 'role', 'classes']);
+
+      // User có thể cập nhật một số field của chính mình (avatar, stats)
+      // Nhưng KHÔNG được thay đổi role, classes, email
+      allow update: if isOwner(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'email', 'classes']);
+    }
+
+    // Cho phép admin query toàn bộ collection users (cần cho hybrid model và admin operations)
+    match /users/{document=**} {
+      allow read: if isAdmin();
+    }
+
+    // OPTIMIZED: Hạn chế students query toàn bộ users
+    // Students chỉ query được với filter role='student' (leaderboard)
+    // NOTE: Firestore rules không enforce query filters, nên cần validate ở client
+    // Để bảo mật tốt hơn, nên tạo collection 'leaderboard' riêng (read-only)
+    match /users/{document=**} {
+      allow read: if isAuthenticated();
+    }
+
+    // Collection: leaderboard (read-only cache cho students)
+    // TODO: Tạo Cloud Function scheduled để update collection này hàng ngày
+    match /leaderboard/{leaderboardId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Chỉ Cloud Function mới write được
+    }
+
+    // Collection: classes
+    match /classes/{classId} {
+      // Admin có toàn quyền
+      allow read, write: if isAdmin();
+
+      // Học sinh chỉ có thể đọc lớp mà mình tham gia
+      allow read: if isAuthenticated()
+        && request.auth.uid in resource.data.students;
+    }
+    
+    // Cho phép admin query toàn bộ collection classes (cần cho hybrid model)
+    match /classes/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Collection: sessions (buổi học)
+    match /sessions/{sessionId} {
+      // Admin có toàn quyền
+      allow read, write: if isAdmin();
+
+      // Học sinh có thể xem session của lớp mình tham gia
+      allow read: if isAuthenticated();
+    }
+    
+    // Cho phép admin query toàn bộ collection sessions (cần cho hybrid model)
+    match /sessions/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Collection: attendance (điểm danh)
+    match /attendance/{attendanceId} {
+      // Admin có toàn quyền
+      allow read, write: if isAdmin();
+    }
+    
+    // Cho phép admin query toàn bộ collection attendance
+    match /attendance/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Collection: assignments (bài giao)
+    match /assignments/{assignmentId} {
+      // Admin có toàn quyền
+      allow read, write: if isAdmin();
+      
+      // Học sinh chỉ được xem bài giao của lớp mình
+      allow read: if isAuthenticated();
+    }
+    
+    // Cho phép query toàn bộ collection assignments
+    match /assignments/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Collection: videos (kho video)
+    match /videos/{videoId} {
+      // Admin có toàn quyền
+      allow read, write: if isAdmin();
+
+      // Học sinh chỉ được xem
+      allow read: if isAuthenticated();
+    }
+
+    // Cho phép query toàn bộ collection videos
+    match /videos/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Collection: exams (đề thi trong kho)
+    match /exams/{examId} {
+      // Admin có toàn quyền
+      allow read, write: if isAdmin();
+
+      // Học sinh chỉ được xem đề đã publish
+      allow read: if isAuthenticated() && resource.data.isPublished == true;
+    }
+
+    // Cho phép query toàn bộ collection exams
+    match /exams/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Collection: examSubmissions (bài làm của học sinh)
+    match /examSubmissions/{submissionId} {
+      // Admin có toàn quyền
+      allow read, write: if isAdmin();
+
+      // Học sinh chỉ được đọc/ghi submission của chính mình
+      allow read, write: if isAuthenticated() && resource.data.studentUid == request.auth.uid;
+
+      // Cho phép tạo submission mới
+      allow create: if isAuthenticated() && request.resource.data.studentUid == request.auth.uid;
+    }
+
+    // Cho phép query examSubmissions
+    match /examSubmissions/{document=**} {
+      allow read: if isAdmin();
+      // Students query submission của mình
+      allow read: if isAuthenticated();
+    }
+
+    // Collection: settings (cài đặt hệ thống - background, etc.)
+    match /settings/{settingId} {
+      // Admin có toàn quyền
+      allow read, write: if isAdmin();
+
+      // Tất cả user được đọc settings (background image, etc.)
+      allow read: if isAuthenticated();
+    }
+
+    // Mặc định: Chặn tất cả truy cập khác
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

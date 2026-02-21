@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run lint)",
+      "Bash(firebase deploy:*)",
+      "Bash(curl -X POST https://us-central1-toanthaybien-2c3d2.cloudfunctions.net/createAdminAccount)",
+      "Bash(curl:*)",
+      "Bash(firebase functions:delete:*)",
+      "Bash(cat:*)",
+      "Bash(npm run dev:*)",
+      "Bash(echo:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(ls -la \"e:\\\\Website\\\\trungtamdaythem-react\\\\src\\\\services\"\" 2>&1 || echo \"Path not found, trying without drive letter \")",
+      "Bash(ls -la \"e:\\\\Website\\\\trungtamdaythem-react\\\\src\\\\components\\\\profile\"\" 2>&1 || echo \"Profile directory does not exist \")",
+      "Bash(dir:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(powershell:*)",
+      "Bash(where:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}
