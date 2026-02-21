@@ -4,7 +4,8 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import admin from 'firebase-admin';
-import { readFileSync } from 'fs';
+
+
 
 // ─────────────────────────────────────────────
 // 1. Express + HTTP Server
@@ -29,12 +30,21 @@ const io = new Server(httpServer, {
 // ─────────────────────────────────────────────
 // 2. Firebase Admin
 // ─────────────────────────────────────────────
-const serviceAccount = JSON.parse(
-    readFileSync(new URL('./serviceAccountKey.json', import.meta.url))
-);
+let serviceAccount;
+if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    // Railway / production: đọc từ biến môi trường
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+} else {
+    // Local: đọc từ file (git-ignored)
+    const { readFileSync } = await import('fs');
+    serviceAccount = JSON.parse(
+        readFileSync(new URL('./serviceAccountKey.json', import.meta.url))
+    );
+}
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 console.log('🔥 [Firebase Admin] Initialized successfully.');
+
 
 // ─────────────────────────────────────────────
 // 3. Game Constants
