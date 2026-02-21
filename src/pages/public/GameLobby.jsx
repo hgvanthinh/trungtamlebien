@@ -328,7 +328,7 @@ export function GameLobby() {
                     <div className="flex items-center gap-3">
                         <span className="text-3xl">💣</span>
                         <div>
-                            <h1 className="text-white font-bold text-xl">Sảnh Chờ — Đặt Bom</h1>
+                            <h1 className="text-white font-bold text-xl">Sảnh Chờ — Đặt Bom - CHẾ ĐỘ THỬ NGHIỆM</h1>
                             <p className="text-gray-500 text-xs font-mono">{auth.currentUser?.email}</p>
                         </div>
                     </div>
