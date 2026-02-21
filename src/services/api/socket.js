@@ -3,7 +3,7 @@
 import { io } from 'socket.io-client';
 import { auth } from '../../config/firebase';
 
-const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || 'http://localhost:3001';
+const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || 'https://trungtamlebien-production.up.railway.app/';
 
 export const socket = io(GAME_SERVER_URL, { autoConnect: false });
 

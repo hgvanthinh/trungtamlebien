@@ -18,6 +18,8 @@ const ALLOWED_ORIGINS = [
     'http://localhost:5173',
     /^http:\/\/192\.168\.\d+\.\d+:5173$/,   // bất kỳ IP 192.168.x.x
     /^http:\/\/10\.\d+\.\d+\.\d+:5173$/,    // bất kỳ IP 10.x.x.x
+    'https://toanthaybien.vn',       // Thêm dòng này
+    'https://www.toanthaybien.vn'    // Thêm cả có www cho chắc chắn
 ];
 
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
