@@ -31,18 +31,18 @@
     @apply bg-surface-light dark:bg-surface-dark;
     border-radius: 2rem;
     box-shadow: 10px 10px 20px rgba(174, 190, 180, 0.2),
-                -10px -10px 20px rgba(255, 255, 255, 0.9),
-                inset 0px -4px 10px rgba(0,0,0,0.02);
-    border: 1px solid rgba(255,255,255,0.8);
+      -10px -10px 20px rgba(255, 255, 255, 0.9),
+      inset 0px -4px 10px rgba(0, 0, 0, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.8);
     transition: transform 0.3s ease;
   }
 
   .dark .clay-card {
     background-color: #1a2c1d;
     box-shadow: 10px 10px 20px rgba(0, 0, 0, 0.4),
-                -5px -5px 15px rgba(40, 60, 45, 0.3),
-                inset 0px -4px 10px rgba(0,0,0,0.2);
-    border: 1px solid rgba(255,255,255,0.05);
+      -5px -5px 15px rgba(40, 60, 45, 0.3),
+      inset 0px -4px 10px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.05);
   }
 
   .clay-card:hover {
@@ -52,16 +52,16 @@
   .clay-btn-primary {
     @apply bg-primary text-[#052e16];
     box-shadow: 0px 8px 16px rgba(37, 244, 71, 0.25),
-                inset 0px 4px 6px rgba(255, 255, 255, 0.4),
-                inset 0px -4px 6px rgba(0, 0, 0, 0.1);
+      inset 0px 4px 6px rgba(255, 255, 255, 0.4),
+      inset 0px -4px 6px rgba(0, 0, 0, 0.1);
     transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
 
   .clay-btn-primary:hover {
     transform: translateY(-2px);
     box-shadow: 0px 12px 20px rgba(37, 244, 71, 0.35),
-                inset 0px 4px 6px rgba(255, 255, 255, 0.4),
-                inset 0px -4px 6px rgba(0, 0, 0, 0.1);
+      inset 0px 4px 6px rgba(255, 255, 255, 0.4),
+      inset 0px -4px 6px rgba(0, 0, 0, 0.1);
   }
 
   .clay-btn-primary:active {
@@ -71,13 +71,13 @@
   .clay-input {
     background-color: #f0f5f1;
     box-shadow: inset 4px 4px 8px rgba(174, 190, 180, 0.3),
-                inset -4px -4px 8px rgba(255, 255, 255, 0.8);
+      inset -4px -4px 8px rgba(255, 255, 255, 0.8);
   }
 
   .dark .clay-input {
     background-color: #152016;
     box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.4),
-                inset -4px -4px 8px rgba(255, 255, 255, 0.05);
+      inset -4px -4px 8px rgba(255, 255, 255, 0.05);
   }
 }
 
@@ -102,12 +102,15 @@
 
 /* Hide scrollbar but keep functionality */
 .scrollbar-hide {
-  -ms-overflow-style: none;  /* IE and Edge */
-  scrollbar-width: none;  /* Firefox */
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  scrollbar-width: none;
+  /* Firefox */
 }
 
 .scrollbar-hide::-webkit-scrollbar {
-  display: none;  /* Chrome, Safari and Opera */
+  display: none;
+  /* Chrome, Safari and Opera */
 }
 
 /* Slide-up animation for mobile modal */
@@ -116,6 +119,7 @@
     transform: translateY(100%);
     opacity: 0;
   }
+
   to {
     transform: translateY(0);
     opacity: 1;
@@ -131,6 +135,7 @@
   from {
     transform: translateX(-100%);
   }
+
   to {
     transform: translateX(0);
   }
@@ -146,6 +151,7 @@
     transform: translateX(100%);
     opacity: 0;
   }
+
   to {
     transform: translateX(0);
     opacity: 1;
@@ -162,6 +168,7 @@
     transform: scale(0.9);
     opacity: 0;
   }
+
   to {
     transform: scale(1);
     opacity: 1;
@@ -177,6 +184,7 @@
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
@@ -188,16 +196,83 @@
 
 /* Glow pulse animation for crafting effect */
 @keyframes glow-pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 20px rgba(168, 85, 247, 0.4),
-                0 0 40px rgba(236, 72, 153, 0.3);
+      0 0 40px rgba(236, 72, 153, 0.3);
   }
+
   50% {
     box-shadow: 0 0 40px rgba(168, 85, 247, 0.6),
-                0 0 60px rgba(236, 72, 153, 0.5);
+      0 0 60px rgba(236, 72, 153, 0.5);
   }
 }
 
 .animate-glow-pulse {
   animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Explosion 8-bit flicker for Bomberman */
+@keyframes flameThrob {
+  0% {
+    transform: scale(0.95);
+    filter: contrast(1.2);
+  }
+
+  100% {
+    transform: scale(1);
+    filter: contrast(1);
+  }
+}
+
+/* Block debris shatter animation */
+@keyframes shatter {
+  0% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+    filter: grayscale(0%);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.4) rotate(45deg);
+    filter: grayscale(50%);
+  }
+}
+
+/* Power-up item floating animation */
+@keyframes itemFloat {
+  from {
+    transform: scale(0.88) translateY(1px);
+    filter: brightness(0.9);
+  }
+
+  to {
+    transform: scale(1.08) translateY(-2px);
+    filter: brightness(1.15) drop-shadow(0 0 4px rgba(255, 255, 255, 0.4));
+  }
+}
+
+/* Hit shake — nhân vật rung lắc khi trúng bom (mất mạng) */
+@keyframes hitShake {
+  0% {
+    transform: translateX(0);
+  }
+
+  25% {
+    transform: translateX(-4px) translateY(-2px);
+  }
+
+  50% {
+    transform: translateX(4px) translateY(2px);
+  }
+
+  75% {
+    transform: translateX(-3px) translateY(-1px);
+  }
+
+  100% {
+    transform: translateX(0);
+  }
 }

@@ -3,26 +3,54 @@
 import { io } from 'socket.io-client';
 import { auth } from '../../config/firebase';
 
-const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || 'https://trungtamlebien-production.up.railway.app/';
+// Môi trường dev (.env.local): trỏ về localhost:3001
+// Môi trường production (Railway): không có .env.local → fallback Railway URL
+const PRODUCTION_URL = 'https://trungtamlebien-production.up.railway.app/';
+const GAME_SERVER_URL = import.meta.env.VITE_GAME_SERVER_URL || PRODUCTION_URL;
 
-export const socket = io(GAME_SERVER_URL, { autoConnect: false });
+const IS_LOCAL = GAME_SERVER_URL.includes('localhost') || GAME_SERVER_URL.includes('192.168.');
+
+console.log(
+    `🎮 [Socket] Game Server URL: ${GAME_SERVER_URL}`,
+    IS_LOCAL ? '(LOCAL)' : '(PRODUCTION)'
+);
+
+export const socket = io(GAME_SERVER_URL, {
+    autoConnect: false,
+    // Khi chạy local, tăng timeout để tránh lỗi do server khởi động chậm
+    timeout: IS_LOCAL ? 10000 : 5000,
+});
 
 /** Kết nối đến Game Server với Firebase ID Token + avatar */
 export async function connectToGameServer(photoURL = '', fullName = '') {
     const currentUser = auth.currentUser;
     if (!currentUser) throw new Error('User chưa đăng nhập.');
     if (socket.connected) socket.disconnect();
+
     const idToken = await currentUser.getIdToken(true);
     socket.auth = { token: idToken, photoURL, fullName };   // gửi kèm avatar + tên
+
     return new Promise((resolve, reject) => {
         socket.connect();
-        socket.once('connect', () => { console.log(`✅ [Socket] Connected | ${socket.id}`); resolve(); });
-        socket.once('connect_error', (err) => { console.error(`❌ [Socket] Error: ${err.message}`); reject(new Error(err.message)); });
+        socket.once('connect', () => {
+            console.log(`✅ [Socket] Connected | ${socket.id} → ${GAME_SERVER_URL}`);
+            resolve();
+        });
+        socket.once('connect_error', (err) => {
+            const hint = IS_LOCAL
+                ? ' (Đã khởi động game-server chưa? → cd game-server && npm run dev)'
+                : '';
+            console.error(`❌ [Socket] Error: ${err.message}${hint}`);
+            reject(new Error(err.message));
+        });
     });
 }
 
 export function disconnectFromGameServer() {
-    if (socket.connected) { socket.disconnect(); console.log('🔌 [Socket] Disconnected.'); }
+    if (socket.connected) {
+        socket.disconnect();
+        console.log('🔌 [Socket] Disconnected.');
+    }
 }
 
 // ── Lobby ────────────────────────────────────

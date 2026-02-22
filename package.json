@@ -8,11 +8,13 @@
     "build": "vite build",
     "lint": "eslint .",
     "dev:all": "concurrently \"npm run dev\" \"firebase emulators:start\"",
+    "dev:game": "concurrently --names \"VITE,GAME\" --prefix-colors \"cyan,yellow\" \"vite\" \"npm run dev --prefix game-server\"",
     "preview": "vite preview"
   },
   "dependencies": {
     "browser-image-compression": "^2.0.2",
     "firebase": "^12.7.0",
+    "howler": "^2.2.4",
     "html2pdf.js": "^0.13.0",
     "mammoth": "^1.11.0",
     "mathlive": "^0.108.2",
