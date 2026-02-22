@@ -31,6 +31,7 @@ const Sidebar = ({ user, onLogout, onMenuItemClick }) => {
     { path: '/admin/store', icon: 'storefront', label: 'Quản lý Cửa Hàng', filled: true },
     { path: '/admin/exam-bank', icon: 'quiz', label: 'Kho đề thi' },
     { path: '/admin/videos', icon: 'video_library', label: 'Kho video' },
+    { path: '/game-lobby', icon: 'stadia_controller', label: 'Game vui Toán', filled: true, badge: '🎮 Mới' },
     { path: '/admin/grade-submissions', icon: 'grading', label: 'Chấm bài' },
     { path: '/admin/background-settings', icon: 'wallpaper', label: 'Cài đặt hình nền' },
     { path: '/admin/stats', icon: 'analytics', label: 'Thống kê', disabled: true },
