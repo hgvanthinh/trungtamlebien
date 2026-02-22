@@ -60,7 +60,7 @@ const CELL_BLOCK = 2;      // destructible
 const BOMB_TIMER = 3000;  // ms
 const EXPLOSION_DUR = 700;   // ms
 const BOMB_RANGE = 3;
-const PLAYER_INIT_LIVES = 2;    // số mạng mặc định
+const PLAYER_INIT_LIVES = 1;    // số mạng mặc định
 const MOVE_COOLDOWN = 130;   // ms/player
 const ENTRY_COST = 20;    // ← Xu mỗi người phải bỏ ra để chơi
 // Phần thưởng người thắng = số người × ENTRY_COST (toàn bộ pool).
@@ -264,12 +264,12 @@ function initGameState(room) {
         [blockPositions[i], blockPositions[j]] = [blockPositions[j], blockPositions[i]];
     }
 
-    // Mỗi loại item: số lượng = số người chơi
+    // Mỗi loại item: số lượng = số người chơi + 1
     const ITEM_TYPES = ['life', 'range', 'bomb'];
     const hiddenItems = {};
     let idx = 0;
     for (const type of ITEM_TYPES) {
-        for (let k = 0; k < playerCount && idx < blockPositions.length; k++, idx++) {
+        for (let k = 0; k < playerCount + 1 && idx < blockPositions.length; k++, idx++) {
             const [r, c] = blockPositions[idx];
             hiddenItems[`${r},${c}`] = type;
         }
@@ -357,7 +357,7 @@ async function explodeBomb(roomId, bombId) {
     }
 
     // Add explosion visual
-    const expEntry = { id: `exp_${Date.now()}`, cells, expiresAt: Date.now() + EXPLOSION_DUR };
+    const expEntry = { id: `exp_${Date.now()}`, ownerUid: bomb.ownerUid, cells, expiresAt: Date.now() + EXPLOSION_DUR };
     gs.explosions.push(expEntry);
     setTimeout(() => {
         const gs2 = gameStates.get(roomId);
@@ -589,8 +589,10 @@ io.on('connection', (socket) => {
 
         if (nr < 0 || nr >= MAP_H || nc < 0 || nc >= MAP_W) return;
         if (gs.map[nr][nc] !== CELL_EMPTY) return;
-        // Can't walk into a bomb (except the one you just placed — simplified: no pass-through)
+        // Can't walk into a bomb
         if (gs.bombs.some(b => b.row === nr && b.col === nc)) return;
+        // Can't walk into another alive player
+        if (Object.values(gs.players).some(p => p.alive && p.uid !== uid && p.row === nr && p.col === nc)) return;
 
         player.row = nr;
         player.col = nc;

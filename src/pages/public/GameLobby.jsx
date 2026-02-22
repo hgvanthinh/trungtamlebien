@@ -213,7 +213,7 @@ export function GameLobby() {
             setCurrentRoom(prev => prev?.id === room.id ? room : prev);
         }
         function onRoomError({ message }) { setRoomError(message); }
-        function onGameStart({ roomId }) { navigate(`/game/${roomId}`); }
+        function onGameStart({ roomId }) { navigate(`/phaser-game/${roomId}`); }
 
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);

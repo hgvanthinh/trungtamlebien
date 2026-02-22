@@ -32,6 +32,7 @@ import Inventory from './pages/Inventory';
 import AdminStore from './pages/admin/AdminStore';
 import GameLobby from './pages/public/GameLobby';
 import BombGame from './pages/public/BombGame';
+import PhaserBombGame from './pages/public/PhaserBombGame';
 
 function App() {
   return (
@@ -66,6 +67,7 @@ function App() {
                 <Route path="videos" element={<Videos />} />
                 <Route path="game-lobby" element={<GameLobby />} />
                 <Route path="game/:roomId" element={<BombGame />} />
+                <Route path="phaser-game/:roomId" element={<PhaserBombGame />} />
               </Route>
 
               {/* Admin routes */}
