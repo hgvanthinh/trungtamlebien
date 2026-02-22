@@ -64,3 +64,5 @@ export const startGame = (roomId) => socket.emit('room:start', { roomId });
 /** direction: 'up' | 'down' | 'left' | 'right' */
 export const movePlayer = (roomId, direction) => socket.emit('game:move', { roomId, direction });
 export const placeBomb = (roomId) => socket.emit('game:bomb', { roomId });
+/** Thoát khỏi game đang diễn ra (nhấn X trong game) — server sẽ xử lý thua + kết thúc game */
+export const leaveGame = (roomId) => socket.emit('game:leave', { roomId });

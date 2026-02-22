@@ -1,7 +1,7 @@
 // src/pages/public/BombGame.jsx
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { socket, movePlayer, placeBomb, leaveRoom } from '../../services/api/socket';
+import { socket, movePlayer, placeBomb, leaveRoom, leaveGame } from '../../services/api/socket';
 import { auth } from '../../config/firebase';
 import { playSound, toggleMute, isMuted, playBGM, stopBGM } from '../../utils/audioManager';
 
@@ -417,6 +417,12 @@ export function BombGame() {
     const keysHeld = useRef(new Set());
     const moveInterv = useRef(null);      // keyboard repeat interval
     const touchInterv = useRef(null);     // touch d-pad repeat interval (riêng để không xung đột keyboard)
+    // Tap-to-move refs (dùng RAF + throttle thay vì setInterval)
+    const tapTarget = useRef(null);       // { row, col } — ô đích hiện tại
+    const tapActiveRef = useRef(false);   // ngón tay đang giữ xuống?
+    const tapRafRef = useRef(null);       // RAF id của loop tap-to-move
+    const tapLastMove = useRef(0);        // timestamp lần doMove() gần nhất
+    const viewportRef = useRef(null);     // ref tới div viewport game
     const prevMapRef = useRef(null); // lưu bản đồ trước để phát hiện BLOCK→EMPTY
     const gameStateRef = useRef(null); // mirror cho interval callback (tránh stale closure)
     const camInitialized = useRef(false); // đã snap camera lần đầu chưa
@@ -848,13 +854,109 @@ export function BombGame() {
             window.removeEventListener('keydown', dn);
             window.removeEventListener('keyup', up);
             clearInterval(moveInterv.current);
+            // Cleanup tap-to-move RAF khi unmount
+            tapActiveRef.current = false;
+            if (tapRafRef.current) cancelAnimationFrame(tapRafRef.current);
         };
     }, [doMove, handleBomb]);
 
     const handleBack = useCallback(() => {
-        leaveRoom(roomId);
+        // Nếu game đang diễn ra → emit game:leave để server xử lý thua/thắng
+        // Nếu game đã kết thúc (gameOver) → chỉ emit room:leave (rời phòng bình thường)
+        if (!gameOver) {
+            leaveGame(roomId);
+        } else {
+            leaveRoom(roomId);
+        }
         navigate('/game-lobby');
-    }, [roomId, navigate]);
+    }, [roomId, navigate, gameOver]);
+
+    // ── Tap-to-Move: chạm vào viewport để di chuyển nhân vật ────
+    // Dùng RAF loop + throttle timestamp để đảm bảo tốc độ đúng MOVE_INTERVAL_MS,
+    // tránh lag và burst khi tap liên tục.
+
+    // Hàm cương-convert tọa độ chạm → ô đích (dùng cả ba handler)
+    const calcTapTarget = useCallback((touch) => {
+        if (!viewportRef.current) return null;
+        const rect = viewportRef.current.getBoundingClientRect();
+        const cs = cellSizeRef.current;
+        const relX = touch.clientX - rect.left + currentCam.current.x;
+        const relY = touch.clientY - rect.top + currentCam.current.y;
+        return {
+            row: Math.max(0, Math.min(Math.floor(relY / cs), MAP_H - 1)),
+            col: Math.max(0, Math.min(Math.floor(relX / cs), MAP_W - 1)),
+        };
+    }, []);
+
+    // RAF loop: chạy khi tapActiveRef = true, thực hiện doMove() theo đúng nhịp MOVE_INTERVAL_MS
+    const startTapRaf = useCallback(() => {
+        if (tapRafRef.current) return; // đã đang chạy
+        const loop = (now) => {
+            if (!tapActiveRef.current) {
+                tapRafRef.current = null;
+                return;
+            }
+            const target = tapTarget.current;
+            if (target) {
+                const elapsed = now - tapLastMove.current;
+                if (elapsed >= MOVE_INTERVAL_MS) {
+                    const gs = gameStateRef.current;
+                    const me = gs?.players[currentUid];
+                    if (me?.alive) {
+                        const dRow = target.row - me.row;
+                        const dCol = target.col - me.col;
+                        if (dRow !== 0 || dCol !== 0) {
+                            let dir;
+                            if (Math.abs(dRow) >= Math.abs(dCol)) {
+                                dir = dRow > 0 ? 'down' : 'up';
+                            } else {
+                                dir = dCol > 0 ? 'right' : 'left';
+                            }
+                            doMove(dir);
+                            tapLastMove.current = now;
+                        }
+                    }
+                }
+            }
+            tapRafRef.current = requestAnimationFrame(loop);
+        };
+        tapRafRef.current = requestAnimationFrame(loop);
+    }, [doMove, currentUid]);
+
+    const stopTapRaf = useCallback(() => {
+        tapActiveRef.current = false;
+        if (tapRafRef.current) {
+            cancelAnimationFrame(tapRafRef.current);
+            tapRafRef.current = null;
+        }
+        tapTarget.current = null;
+    }, []);
+
+    const handleMapTouch = useCallback((e) => {
+        if (e.cancelable) e.preventDefault();
+        const touch = e.touches[0];
+        if (!touch) return;
+        const target = calcTapTarget(touch);
+        if (!target) return;
+        tapTarget.current = target;
+        tapActiveRef.current = true;
+        // Đặt tapLastMove = 0 để bước đầu tiên xảy ra ngay lập tức
+        tapLastMove.current = 0;
+        startTapRaf();
+    }, [calcTapTarget, startTapRaf]);
+
+    const handleMapTouchMove = useCallback((e) => {
+        if (e.cancelable) e.preventDefault();
+        const touch = e.touches[0];
+        if (!touch) return;
+        const target = calcTapTarget(touch);
+        if (target) tapTarget.current = target;
+    }, [calcTapTarget]);
+
+    const handleMapTouchEnd = useCallback((e) => {
+        if (e.cancelable) e.preventDefault();
+        stopTapRaf();
+    }, [stopTapRaf]);
 
     // ── Explosion lookup (dùng calculateExplosion client-side) ────────────
     // Tập hợp tất cả ô đang bị lửa, được tính lại từ dữ liệu server
@@ -1069,10 +1171,16 @@ export function BombGame() {
                 style={{ paddingBottom: `max(${DPAD_H}px, calc(${DPAD_H}px + env(safe-area-inset-bottom)))` }}
             >
                 <div
+                    ref={viewportRef}
                     className="relative rounded-xl border border-white/10"
+                    onTouchStart={handleMapTouch}
+                    onTouchMove={handleMapTouchMove}
+                    onTouchEnd={handleMapTouchEnd}
+                    onTouchCancel={handleMapTouchEnd}
                     style={{
                         width: vpW, height: vpH,
                         overflow: 'hidden',
+                        touchAction: 'none',
                         boxShadow: '0 0 40px rgba(99,102,241,.15), 0 25px 50px -12px rgba(0,0,0,.8)',
                     }}
                 >
@@ -1361,6 +1469,9 @@ export function BombGame() {
 
                 <p className="text-gray-700 text-xs hidden md:block tracking-wide pb-2">
                     WASD · ↑↓←→ di chuyển &nbsp;·&nbsp; Space / Enter đặt bom
+                </p>
+                <p className="text-gray-700/60 text-[10px] md:hidden tracking-wide pb-1 text-center">
+                    Chạm bản đồ để di chuyển · D-Pad hoặc chạm vào ô đích
                 </p>
             </div>
         </div>

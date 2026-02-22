@@ -63,9 +63,10 @@ const BOMB_RANGE = 3;
 const PLAYER_INIT_LIVES = 2;    // số mạng mặc định
 const MOVE_COOLDOWN = 130;   // ms/player
 const ENTRY_COST = 20;    // ← Xu mỗi người phải bỏ ra để chơi
-// Phần thưởng người thắng = max(tổng xu thu được, 100)
-// → ít người: đảm bảo tối thiểu 100 xu; nhiều người: được cả Pool
-// Công thức: Math.max(playerCount * ENTRY_COST, 100)
+// Phần thưởng người thắng = số người × ENTRY_COST (toàn bộ pool).
+// Không có sàn cố định để tránh gian lận khi ít người chơi.
+/** Tính xu thưởng cho người thắng (toàn bộ pool không floor) */
+function calcReward(playerCount) { return playerCount * ENTRY_COST; }
 
 // ─────────────────────────────────────────────
 // ←← CHỈNH THỜI GIAN GIỚI HẠN VÁN CHƠI TẠI ĐÂY →→
@@ -227,12 +228,11 @@ async function refundSurvivors(players, survivorUids) {
     console.log('[Xu] refundSurvivors done.');
 }
 
-/** Award winner with max(pool, 100) xu */
+/** Award winner with playerCount * ENTRY_COST xu (no artificial floor) */
 async function rewardWinner(uid, playerCount) {
     try {
-        const pool = playerCount * ENTRY_COST; // tổng xu thu được từ người chơi
-        const reward = Math.max(pool, 100);    // đảm bảo tối thiểu 100 xu
-        console.log(`[Xu] rewardWinner uid=${uid} | pool=${pool} | reward=${reward}`);
+        const reward = calcReward(playerCount); // = playerCount × 20 Xu
+        console.log(`[Xu] rewardWinner uid=${uid} | playerCount=${playerCount} | reward=${reward}`);
         const ref = db.collection('users').doc(uid);
         const snap = await ref.get();
         if (!snap.exists) {
@@ -378,7 +378,7 @@ async function explodeBomb(roomId, bombId) {
             const winnerName = gs.winner ? gs.players[gs.winner]?.name : null;
             // Tính trước để gửi cho client biết trước khi Firebase cập nhật xong
             const room = rooms.get(roomId);
-            const reward = room ? Math.max(room.players.length * ENTRY_COST, 100) : 100;
+            const reward = room ? calcReward(room.players.length) : 0;
             io.to(roomId).emit('game:over', { winner: gs.winner, winnerName, reward });
 
             // Xu transactions — await để bắt lỗi đúng cách
@@ -532,7 +532,7 @@ io.on('connection', (socket) => {
                 winner: gs2.winner,
                 winnerName,
                 reason: 'timeout',
-                reward: (!isDraw && room2) ? Math.max(room2.players.length * ENTRY_COST, 100) : 0,
+                reward: (!isDraw && room2) ? calcReward(room2.players.length) : 0,
                 // Hòa hết giờ → hoàn xu cho người còn sống
                 refundedUids: isDraw ? alive.map(p => p.uid) : [],
             });
@@ -630,6 +630,81 @@ io.on('connection', (socket) => {
         broadcastState(roomId);
     });
 
+    // ─── Rời game đang chơi (nhấn X trong game) ─────────────────
+    socket.on('game:leave', async ({ roomId } = {}) => {
+        const room = rooms.get(roomId);
+        const gs = gameStates.get(roomId);
+        if (!room || !gs || gs.status !== 'playing') {
+            // Game không còn tồn tại hoặc đã kết thúc → chỉ rời phòng
+            if (room) {
+                room.players = room.players.filter(p => p.uid !== uid);
+                socket.leave(roomId);
+                if (room.players.length === 0) rooms.delete(roomId);
+                else {
+                    if (room.host === uid) { room.host = room.players[0].uid; room.players[0].isHost = true; }
+                    io.to(roomId).emit('room:updated', room);
+                }
+                io.emit('rooms:list', getAllRooms());
+            }
+            return;
+        }
+
+        console.log(`🚪 [Game] ${email} voluntarily left game in room ${roomId}`);
+
+        // 1. Loại người thoát khỏi game state
+        if (gs.players[uid]) {
+            gs.players[uid].alive = false;
+        }
+
+        // 2. Kiểm tra điều kiện kết thúc
+        const alivePlayers = Object.values(gs.players).filter(p => p.alive);
+
+        if (alivePlayers.length <= 1) {
+            // Kết thúc game — người còn lại (nếu có) thắng
+            gs.status = 'finished';
+            clearTimeout(gs._gameTimer);
+            gs.winner = alivePlayers.length === 1 ? alivePlayers[0].uid : null;
+            const winnerName = gs.winner ? gs.players[gs.winner]?.name : null;
+            const reward = room ? calcReward(room.players.length) : 0;
+
+            io.to(roomId).emit('game:over', {
+                winner: gs.winner,
+                winnerName,
+                reward,
+                reason: 'forfeit', // người chơi chủ động thoát
+            });
+            console.log(`🏆 [Game] Over (forfeit) | winner: ${winnerName || 'none'} | room: ${roomId}`);
+
+            // Xu transactions
+            try {
+                await deductEntryFees(room.players);
+                if (gs.winner) await rewardWinner(gs.winner, room.players.length);
+            } catch (e) {
+                console.error('[Xu] Transaction error (game:leave):', e.message);
+            }
+
+            // Dọn sau 15s
+            setTimeout(() => {
+                gameStates.delete(roomId);
+                const r = rooms.get(roomId);
+                if (r) { r.status = 'waiting'; r.players.forEach(p => p.isReady = false); io.emit('rooms:list', getAllRooms()); }
+            }, 15000);
+        } else {
+            // Vẫn còn nhiều người → broadcast state mới
+            broadcastState(roomId);
+        }
+
+        // 3. Xóa người chơi khỏi danh sách phòng và socket room
+        room.players = room.players.filter(p => p.uid !== uid);
+        socket.leave(roomId);
+        if (room.players.length === 0) {
+            rooms.delete(roomId);
+        } else {
+            if (room.host === uid) { room.host = room.players[0].uid; room.players[0].isHost = true; }
+        }
+        io.emit('rooms:list', getAllRooms());
+    });
+
     // ─── Sync: client requests current state after navigation ──
     socket.on('game:sync', ({ roomId } = {}) => {
         const gs = gameStates.get(roomId);
@@ -643,7 +718,7 @@ io.on('connection', (socket) => {
 
     // ─── Disconnect ───────────────────────────────
 
-    socket.on('disconnect', (reason) => {
+    socket.on('disconnect', async (reason) => {
         console.log(`❌ [Socket] Disconnected | ${socket.id} | ${email} | ${reason}`);
 
         for (const [roomId, room] of rooms.entries()) {
@@ -686,12 +761,17 @@ io.on('connection', (socket) => {
                         winner: gs.winner,
                         winnerName,
                         reason: 'disconnect', // để client biết nguyên nhân
+                        reward: gs.winner ? calcReward(room.players.length) : 0,
                     });
                     console.log(`🏆 [Game] Over | winner: ${winnerName || 'none'} | room: ${roomId}`);
 
                     // Xu
-                    deductEntryFees(room.players);
-                    if (gs.winner) rewardWinner(gs.winner);
+                    try {
+                        await deductEntryFees(room.players);
+                        if (gs.winner) await rewardWinner(gs.winner, room.players.length);
+                    } catch (e) {
+                        console.error('[Xu] Transaction error (disconnect):', e.message);
+                    }
 
                     // Dọn sau 15s
                     setTimeout(() => {
