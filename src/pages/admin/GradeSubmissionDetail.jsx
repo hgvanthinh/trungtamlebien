@@ -185,11 +185,19 @@ const GradeSubmissionDetail = () => {
     );
   }
 
+  // Sort ảnh theo trường `order` (để đảm bảo thứ tự HS upload)
+  const sortedFiles = submission?.files
+    ? [...submission.files].sort((a, b) => {
+      if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+      return 0; // Giữ nguyên nếu không có order
+    })
+    : [];
+
   // Show PDFAnnotator
   if (showAnnotator) {
-    // Nếu nhiều file, pass array of URLs; nếu 1 file thì dùng single URL
-    const fileUrls = submission.files && submission.files.length > 0
-      ? submission.files.map(f => f.fileUrl)
+    // Nếu nhiều file, pass array of URLs theo thứ tự đã sort; nếu 1 file thì dùng single URL
+    const fileUrls = sortedFiles.length > 0
+      ? sortedFiles.map(f => f.fileUrl)
       : [submission.fileUrl];
 
     // existingAnnotations: mảng { page, imageUrl } để PDFAnnotator load ghi chú cũ
@@ -206,6 +214,7 @@ const GradeSubmissionDetail = () => {
       />
     );
   }
+
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -254,14 +263,14 @@ const GradeSubmissionDetail = () => {
 
             {/* File preview */}
             <div className="bg-gray-100 dark:bg-gray-800 rounded-xl p-4 min-h-[400px]">
-              {submission.files && Array.isArray(submission.files) && submission.files.length > 0 ? (
+              {sortedFiles.length > 0 ? (
                 // Multiple images - Show one at a time with navigation
                 <div className="space-y-4">
                   {/* Header with navigation + badge gửi chú */}
                   <div className="flex items-center justify-between mb-3">
                     <span className="flex items-center gap-2">
                       <p className="text-sm font-medium text-[#111812] dark:text-white">
-                        Ảnh {currentImageIndex + 1} / {submission.files.length}
+                        Ảnh {currentImageIndex + 1} / {sortedFiles.length}
                       </p>
                       {/* Hiển thị badge nếu ảnh này đã có ghi chú */}
                       {submission.annotations?.some(a => a.page === currentImageIndex + 1) && (
@@ -281,8 +290,8 @@ const GradeSubmissionDetail = () => {
                         <Icon name="chevron_left" />
                       </button>
                       <button
-                        onClick={() => setCurrentImageIndex(prev => Math.min(submission.files.length - 1, prev + 1))}
-                        disabled={currentImageIndex === submission.files.length - 1}
+                        onClick={() => setCurrentImageIndex(prev => Math.min(sortedFiles.length - 1, prev + 1))}
+                        disabled={currentImageIndex === sortedFiles.length - 1}
                         className="p-2 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         aria-label="Ảnh sau"
                       >
@@ -295,7 +304,7 @@ const GradeSubmissionDetail = () => {
                   {(() => {
                     const pageNum = currentImageIndex + 1;
                     const annotation = submission.annotations?.find(a => a.page === pageNum);
-                    const displayUrl = annotation ? annotation.imageUrl : submission.files[currentImageIndex].fileUrl;
+                    const displayUrl = annotation ? annotation.imageUrl : sortedFiles[currentImageIndex].fileUrl;
                     const isAnnotated = !!annotation;
                     return (
                       <div className={`bg-white dark:bg-gray-900 rounded-lg p-3 border-2 ${isAnnotated ? 'border-blue-400 dark:border-blue-500' : 'border-gray-200 dark:border-gray-700'
@@ -303,7 +312,7 @@ const GradeSubmissionDetail = () => {
                         <div className="flex items-center gap-2 mb-2">
                           <Icon name={isAnnotated ? 'draw' : 'image'} className={`text-sm ${isAnnotated ? 'text-blue-500' : 'text-primary'}`} />
                           <p className="text-xs font-medium text-[#608a67] dark:text-[#8ba890]">
-                            {isAnnotated ? 'Bài đã ghi chú (trang ' + pageNum + ')' : submission.files[currentImageIndex].fileName}
+                            {isAnnotated ? 'Bài đã ghi chú (trang ' + pageNum + ')' : sortedFiles[currentImageIndex].fileName}
                           </p>
                         </div>
                         <img
@@ -316,9 +325,9 @@ const GradeSubmissionDetail = () => {
                   })()}
 
                   {/* Thumbnail navigation */}
-                  {submission.files.length > 1 && (
+                  {sortedFiles.length > 1 && (
                     <div className="flex gap-2 overflow-x-auto pb-2">
-                      {submission.files.map((file, index) => {
+                      {sortedFiles.map((file, index) => {
                         const pageNum = index + 1;
                         const annotation = submission.annotations?.find(a => a.page === pageNum);
                         const thumbUrl = annotation ? annotation.imageUrl : file.fileUrl;

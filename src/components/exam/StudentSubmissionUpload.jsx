@@ -113,6 +113,7 @@ const StudentSubmissionUpload = ({ examId, studentUid, onUploadComplete, onCance
           fileType: 'image',
           originalSize: processedResult.originalSize,
           processedSize: processedResult.processedSize,
+          order: i, // Lưu thứ tự upload để hiển thị đúng thứ tự
         });
       }
 
