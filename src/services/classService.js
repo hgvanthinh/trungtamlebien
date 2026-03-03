@@ -227,21 +227,15 @@ export const saveSession = async (classId, date, attendance, testScores, behavio
       }
     }
 
-    // 4. Cập nhật điểm học tập cho từng học sinh
+    // 4. Cập nhật điểm học tập cho từng học sinh (set trực tiếp, không cộng dồn)
     if (studyPointsAdjustment && Object.keys(studyPointsAdjustment).length > 0) {
       for (const [studentUid, data] of Object.entries(studyPointsAdjustment)) {
         const userRef = doc(db, 'users', studentUid);
-        const userDoc = await getDoc(userRef);
 
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          const currentStudyPoints = userData.studyPoints || 0;
-          const newStudyPoints = currentStudyPoints + (data.points || 0);
-
-          await updateDoc(userRef, {
-            studyPoints: newStudyPoints,
-          });
-        }
+        // Set trực tiếp: 'Vắng' hoặc số điểm (kể cả 0)
+        await updateDoc(userRef, {
+          studyPoints: data.points,
+        });
       }
     }
 
@@ -448,7 +442,7 @@ export const resetStudyPoints = async (studentUids) => {
     const updatePromises = studentUids.map((studentUid) => {
       const userRef = doc(db, 'users', studentUid);
       return updateDoc(userRef, {
-        studyPoints: 0,
+        studyPoints: null,
       });
     });
 

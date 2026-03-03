@@ -384,9 +384,9 @@ const Teaching = () => {
           studyPoints[studentUid] = { points: 'Vắng' };
         } else {
           const value = parseFloat(inputValue);
-          if (!isNaN(value) && value !== 0) {
-            // Làm tròn đến 1 chữ số sau dấu phẩy
-            studyPoints[studentUid] = { points: Math.round(value * 10) / 10 };
+          if (!isNaN(value)) {
+            // Làm tròn đến 2 chữ số sau dấu phẩy (cho phép lưu 0 điểm)
+            studyPoints[studentUid] = { points: Math.round(value * 100) / 100 };
           }
         }
       });
@@ -429,7 +429,7 @@ const Teaching = () => {
     }
 
     const selectedClass = classes.find((c) => c.id === selectedClassId);
-    if (!confirm(`Reset điểm học tập cho tất cả học sinh lớp ${selectedClass?.name} về 0 ? `)) {
+    if (!confirm(`Reset điểm học tập cho tất cả học sinh lớp ${selectedClass?.name}? `)) {
       return;
     }
 
@@ -807,7 +807,7 @@ const Teaching = () => {
                       </div>
                       <div className="flex items-center gap-1.5 text-[14px]">
                         <span className="text-fuchsia-800 dark:text-fuchsia-500 font-bold">
-                          {student.studyPoints === 'Vắng' || typeof student.studyPoints !== 'number' || student.studyPoints === 0 ? 'Vắng' : student.studyPoints.toFixed(1) + ' điểm'}
+                          {student.studyPoints == null || student.studyPoints === 'Vắng' || typeof student.studyPoints !== 'number' ? 'Vắng' : student.studyPoints.toFixed(2) + ' điểm'}
                         </span>
                       </div>
                     </div>
@@ -898,7 +898,7 @@ const Teaching = () => {
                             <div className="transform scale-75 origin-center flex items-center">
                               <Icon name="bolt" />
                             </div>
-                            {student.studyPoints === 'Vắng' || typeof student.studyPoints !== 'number' || student.studyPoints === 0 ? 'Vắng' : student.studyPoints.toFixed(1) + ' điểm'}
+                            {student.studyPoints == null || student.studyPoints === 'Vắng' || typeof student.studyPoints !== 'number' ? 'Vắng' : student.studyPoints.toFixed(2) + ' điểm'}
                           </span>
                         </div>
                       </div>

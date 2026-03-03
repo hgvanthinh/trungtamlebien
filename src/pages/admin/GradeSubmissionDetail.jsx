@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { getExamById } from '../../services/examBankService';
@@ -10,6 +10,11 @@ import PDFAnnotator from '../../components/exam/PDFAnnotator';
 const GradeSubmissionDetail = () => {
   const { submissionId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const navState = location.state || {};
+  const submissionsList = navState.submissionsList || [];
+  const currentIndex = navState.currentIndex ?? -1;
+  const isLastSubmission = currentIndex === -1 || currentIndex >= submissionsList.length - 1;
   const [submission, setSubmission] = useState(null);
   const [exam, setExam] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -80,10 +85,20 @@ const GradeSubmissionDetail = () => {
         gradedAt: serverTimestamp(),
       });
 
-      setToast({ type: 'success', message: 'Đã lưu điểm thành công!' });
-      setTimeout(() => {
-        navigate('/admin/grade-submissions');
-      }, 1500);
+      if (isLastSubmission) {
+        setToast({ type: 'success', message: 'Đã chấm xong tất cả bài! Quay về danh sách.' });
+        setTimeout(() => {
+          navigate('/admin/grade-submissions');
+        }, 1500);
+      } else {
+        const nextId = submissionsList[currentIndex + 1];
+        navigate(`/admin/grade-submissions/${nextId}`, {
+          state: {
+            ...navState,
+            currentIndex: currentIndex + 1,
+          }
+        });
+      }
     } catch (error) {
       console.error('Error saving grade:', error);
       setToast({ type: 'error', message: 'Lỗi khi lưu điểm' });
@@ -204,10 +219,20 @@ const GradeSubmissionDetail = () => {
         </button>
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-[#111812] dark:text-white">
-            Chấm bài: {exam?.title}
+            Chấm bài: {exam?.title || navState.examTitle}
           </h1>
           <p className="text-[#608a67] dark:text-[#8ba890]">
             Học sinh: {submission.studentName}
+            {navState.className && (
+              <span className="ml-2 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-bold rounded-full">
+                Lớp {navState.className}
+              </span>
+            )}
+            {submissionsList.length > 0 && (
+              <span className="ml-2 text-xs text-[#608a67] dark:text-[#8ba890]">
+                ({currentIndex + 1}/{submissionsList.length})
+              </span>
+            )}
           </p>
         </div>
       </div>
@@ -302,8 +327,8 @@ const GradeSubmissionDetail = () => {
                             key={index}
                             onClick={() => setCurrentImageIndex(index)}
                             className={`flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 transition-all ${index === currentImageIndex
-                                ? 'border-primary shadow-lg'
-                                : 'border-gray-300 dark:border-gray-600 opacity-60 hover:opacity-100'
+                              ? 'border-primary shadow-lg'
+                              : 'border-gray-300 dark:border-gray-600 opacity-60 hover:opacity-100'
                               }`}
                           >
                             <img
@@ -448,10 +473,15 @@ const GradeSubmissionDetail = () => {
                     <div className="animate-spin rounded-full h-5 w-5 border-2 border-[#052e16] border-t-transparent"></div>
                     Đang lưu...
                   </>
-                ) : (
+                ) : isLastSubmission ? (
                   <>
                     <Icon name="check_circle" />
-                    Lưu điểm
+                    Lưu & Hoàn thành
+                  </>
+                ) : (
+                  <>
+                    <Icon name="navigate_next" />
+                    Lưu & Chấm tiếp
                   </>
                 )}
               </button>

@@ -17,6 +17,7 @@ const Students = () => {
   const [selectedStudents, setSelectedStudents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [classFilter, setClassFilter] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -34,19 +35,32 @@ const Students = () => {
   }, []);
 
   useEffect(() => {
-    if (searchQuery.trim() === '') {
-      setFilteredStudents(students);
-    } else {
+    let filtered = students;
+
+    // Lọc theo lớp
+    if (classFilter === '__unassigned__') {
+      filtered = filtered.filter(
+        (student) => !student.classes || student.classes.length === 0
+      );
+    } else if (classFilter) {
+      filtered = filtered.filter(
+        (student) => student.classes && student.classes.includes(classFilter)
+      );
+    }
+
+    // Lọc theo từ khóa tìm kiếm
+    if (searchQuery.trim() !== '') {
       const query = searchQuery.toLowerCase();
-      const filtered = students.filter(
+      filtered = filtered.filter(
         (student) =>
           student.fullName.toLowerCase().includes(query) ||
           student.username.toLowerCase().includes(query) ||
           student.email.toLowerCase().includes(query)
       );
-      setFilteredStudents(filtered);
     }
-  }, [searchQuery, students]);
+
+    setFilteredStudents(filtered);
+  }, [searchQuery, classFilter, students]);
 
   const loadStudents = async () => {
     const result = await getAllStudents();
@@ -274,9 +288,9 @@ const Students = () => {
           </p>
         </div>
 
-        {/* Search & Bulk Actions */}
-        <div className="flex gap-4 items-center">
-          <div className="relative flex-1 max-w-md">
+        {/* Search & Filter & Bulk Actions */}
+        <div className="flex gap-3 items-center flex-wrap">
+          <div className="relative flex-1 min-w-[200px] max-w-md">
             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[#608a67] dark:text-[#8ba890]">
               <Icon name="search" />
             </div>
@@ -287,6 +301,29 @@ const Students = () => {
               placeholder="Tìm kiếm học sinh..."
               className="w-full pl-10 pr-4 py-3 rounded-xl border border-[#d0e5d4] dark:border-white/20 bg-white dark:bg-white/5 text-[#111812] dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
             />
+          </div>
+
+          {/* Class Filter */}
+          <div className="relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[#608a67] dark:text-[#8ba890] pointer-events-none">
+              <Icon name="class" />
+            </div>
+            <select
+              value={classFilter}
+              onChange={(e) => setClassFilter(e.target.value)}
+              className="pl-10 pr-8 py-3 rounded-xl border border-[#d0e5d4] dark:border-white/20 bg-white dark:bg-white/5 text-[#111812] dark:text-white focus:outline-none focus:ring-2 focus:ring-primary appearance-none cursor-pointer min-w-[180px]"
+            >
+              <option value="">Tất cả lớp</option>
+              <option value="__unassigned__">Chưa phân lớp</option>
+              {classes.map((cls) => (
+                <option key={cls.id} value={cls.id}>
+                  {cls.name}
+                </option>
+              ))}
+            </select>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[#608a67] dark:text-[#8ba890] pointer-events-none">
+              <Icon name="expand_more" />
+            </div>
           </div>
 
           {selectedStudents.length > 0 && (
@@ -313,10 +350,10 @@ const Students = () => {
         <div className="clay-card p-12 text-center">
           <Icon name="person_off" className="text-6xl text-[#608a67] dark:text-[#8ba890] mx-auto mb-4" />
           <h3 className="text-xl font-bold text-[#111812] dark:text-white mb-2">
-            {searchQuery ? 'Không tìm thấy học sinh' : 'Chưa có học sinh nào'}
+            {searchQuery || classFilter ? 'Không tìm thấy học sinh' : 'Chưa có học sinh nào'}
           </h3>
           <p className="text-[#608a67] dark:text-[#8ba890]">
-            {searchQuery ? 'Thử tìm kiếm với từ khóa khác' : 'Học sinh sẽ hiển thị ở đây sau khi đăng ký'}
+            {searchQuery || classFilter ? 'Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm' : 'Học sinh sẽ hiển thị ở đây sau khi đăng ký'}
           </p>
         </div>
       ) : (

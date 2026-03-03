@@ -19,6 +19,7 @@ import Attendance from './pages/admin/Attendance';
 import ExamBank from './pages/admin/ExamBank';
 import GradeSubmissions from './pages/admin/GradeSubmissions';
 import GradeSubmissionDetail from './pages/admin/GradeSubmissionDetail';
+import GradeStats from './pages/admin/GradeStats';
 import Exams from './pages/Exams';
 import ExamTaking from './pages/ExamTaking';
 import ExamResult from './pages/ExamResult';
@@ -88,6 +89,7 @@ function App() {
                 <Route path="exam-bank" element={<ExamBank />} />
                 <Route path="grade-submissions" element={<GradeSubmissions />} />
                 <Route path="grade-submissions/:submissionId" element={<GradeSubmissionDetail />} />
+                <Route path="grade-stats" element={<GradeStats />} />
                 <Route path="videos" element={<VideoLibrary />} />
                 <Route path="background-settings" element={<BackgroundSettings />} />
                 <Route path="store" element={<AdminStore />} />

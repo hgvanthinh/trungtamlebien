@@ -265,7 +265,19 @@ const GradeSubmissions = () => {
                   {/* Chỉ hiển thị nút Chấm cho bài tự luận */}
                   {exam?.type === 'upload' && (
                     <button
-                      onClick={() => navigate(`/admin/grade-submissions/${submission.id}`)}
+                      onClick={() => {
+                        const uploadSubmissions = submissions.filter(() => true); // all submissions in this view
+                        const currentIndex = uploadSubmissions.findIndex(s => s.id === submission.id);
+                        navigate(`/admin/grade-submissions/${submission.id}`, {
+                          state: {
+                            submissionsList: uploadSubmissions.map(s => s.id),
+                            currentIndex,
+                            assignmentId: selectedAssignment.id,
+                            className: cls?.name,
+                            examTitle: exam?.title,
+                          }
+                        });
+                      }}
                       className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all"
                     >
                       <Icon name="grading" className="inline mr-1" />
@@ -285,13 +297,22 @@ const GradeSubmissions = () => {
   return (
     <div className="flex flex-col gap-6 p-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-[#111812] dark:text-white">
-          Chấm bài
-        </h1>
-        <p className="text-[#608a67] dark:text-[#8ba890] mt-1">
-          Danh sách bài đã giao và bài nộp của học sinh
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-[#111812] dark:text-white">
+            Chấm bài
+          </h1>
+          <p className="text-[#608a67] dark:text-[#8ba890] mt-1">
+            Danh sách bài đã giao và bài nộp của học sinh
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/admin/grade-stats')}
+          className="px-4 py-2 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 rounded-xl font-bold hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-all flex items-center gap-2"
+        >
+          <Icon name="bar_chart" />
+          Thống kê điểm
+        </button>
       </div>
 
       {/* Assignments List */}
