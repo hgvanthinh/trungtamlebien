@@ -24,7 +24,7 @@ const Sidebar = ({ user, onLogout, onMenuItemClick }) => {
   const adminMenuItems = [
     { path: '/admin', icon: 'dashboard', label: 'Trang quản trị', filled: true },
     { path: '/admin/teaching', icon: 'edit_note', label: 'Dạy học' },
-    { path: '/admin/violations', icon: 'gavel', label: 'Vi phạm' },
+    { path: '/admin/violations', icon: 'gavel', label: 'Vi phạm - Tài sản' },
     { path: '/admin/attendance', icon: 'event_available', label: 'Điểm danh' },
     { path: '/admin/classes', icon: 'groups', label: 'Lớp học' },
     { path: '/admin/students', icon: 'school', label: 'Quản lý học sinh' },

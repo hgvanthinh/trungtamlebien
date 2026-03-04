@@ -32,6 +32,8 @@ const GradeSubmissionDetail = () => {
   const loadSubmission = async () => {
     try {
       setLoading(true);
+      setScore('');
+      setFeedback('');
 
       // Load submission
       const submissionRef = doc(db, 'examSubmissions', submissionId);
@@ -52,13 +54,9 @@ const GradeSubmissionDetail = () => {
         setExam(examResult.exam);
       }
 
-      // Set existing score and feedback
-      if (submissionData.totalScore !== undefined) {
-        setScore(submissionData.totalScore.toString());
-      }
-      if (submissionData.feedback) {
-        setFeedback(submissionData.feedback);
-      }
+      // Set existing score and feedback (luôn set để reset khi chuyển HS mới)
+      setScore(submissionData.totalScore !== undefined ? submissionData.totalScore.toString() : '');
+      setFeedback(submissionData.feedback || '');
 
       setLoading(false);
     } catch (error) {

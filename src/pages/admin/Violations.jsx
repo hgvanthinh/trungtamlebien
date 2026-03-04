@@ -1,7 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Icon from '../../components/common/Icon';
 import Toast from '../../components/common/Toast';
+import CoinIcon from '../../components/common/CoinIcon';
+import GoldIcon from '../../components/common/GoldIcon';
 import { getAllClasses, getClassStudents, saveViolations, resetViolations } from '../../services/classService';
+import { db } from '../../config/firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 
 const Violations = () => {
   const [classes, setClasses] = useState([]);
@@ -29,6 +33,108 @@ const Violations = () => {
 
   // Tổng cả lớp (tổng tiền nộp phạt trong session)
   const [classTotalPayment, setClassTotalPayment] = useState(0);
+
+  // ── Asset editing mode ──────────────────────────────────────────────────────
+  const [showAssetsMode, setShowAssetsMode] = useState(false);
+  // assetsForms: { [uid]: { totalBehaviorPoints, coins, gold } }
+  const [assetsForms, setAssetsForms] = useState({});
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [savingUid, setSavingUid] = useState(null);
+
+  const buildAssetsForms = useCallback((list) => {
+    const forms = {};
+    list.forEach((s) => {
+      forms[s.uid] = {
+        totalBehaviorPoints: s.totalBehaviorPoints ?? 0,
+        coins: s.coins ?? 0,
+        gold: s.gold ?? 0,
+      };
+    });
+    return forms;
+  }, []);
+
+  const handleToggleAssetsMode = () => {
+    if (!showAssetsMode) {
+      setAssetsForms(buildAssetsForms(students));
+    }
+    setShowAssetsMode((v) => !v);
+  };
+
+  // Close assets mode when class changes
+  useEffect(() => {
+    setShowAssetsMode(false);
+    setAssetsForms({});
+  }, [selectedClassId]);
+
+  const handleAssetsFormChange = (uid, field, value) => {
+    setAssetsForms((prev) => ({
+      ...prev,
+      [uid]: { ...prev[uid], [field]: value },
+    }));
+  };
+
+  const handleSaveOneAsset = async (student) => {
+    const form = assetsForms[student.uid];
+    if (!form) return;
+    setSavingUid(student.uid);
+    try {
+      const userRef = doc(db, 'users', student.uid);
+      await updateDoc(userRef, {
+        totalBehaviorPoints: Number(form.totalBehaviorPoints) || 0,
+        coins: Number(form.coins) || 0,
+        gold: Number(form.gold) || 0,
+      });
+      setToast({ type: 'success', message: `Đã lưu tài sản: ${student.fullName}` });
+      setStudents((prev) =>
+        prev.map((s) =>
+          s.uid === student.uid
+            ? { ...s, totalBehaviorPoints: Number(form.totalBehaviorPoints) || 0, coins: Number(form.coins) || 0, gold: Number(form.gold) || 0 }
+            : s
+        )
+      );
+    } catch (err) {
+      setToast({ type: 'error', message: `Lỗi lưu ${student.fullName}: ${err.message}` });
+    }
+    setSavingUid(null);
+  };
+
+  const handleSaveAllAssets = async () => {
+    setIsSavingAll(true);
+    let ok = 0, fail = 0;
+    for (const student of students) {
+      const form = assetsForms[student.uid];
+      if (!form) continue;
+      try {
+        const userRef = doc(db, 'users', student.uid);
+        await updateDoc(userRef, {
+          totalBehaviorPoints: Number(form.totalBehaviorPoints) || 0,
+          coins: Number(form.coins) || 0,
+          gold: Number(form.gold) || 0,
+        });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setStudents((prev) =>
+      prev.map((s) => {
+        const form = assetsForms[s.uid];
+        if (!form) return s;
+        return {
+          ...s,
+          totalBehaviorPoints: Number(form.totalBehaviorPoints) || 0,
+          coins: Number(form.coins) || 0,
+          gold: Number(form.gold) || 0,
+        };
+      })
+    );
+    setToast({
+      type: fail === 0 ? 'success' : 'error',
+      message: `Đã lưu tài sản ${ok} học sinh${fail > 0 ? ` (${fail} lỗi)` : ''}`,
+    });
+    setIsSavingAll(false);
+    setShowAssetsMode(false);
+  };
 
   // Refs cho input fields để xử lý Enter navigation
   const violationInputRefs = useRef({});
@@ -332,7 +438,7 @@ const Violations = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               {/* Overview Mode Checkbox */}
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
@@ -385,6 +491,21 @@ const Violations = () => {
                 )}
               </div>
 
+              {/* Tài sản Button */}
+              <button
+                onClick={handleToggleAssetsMode}
+                className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all flex items-center gap-2 ${showAssetsMode
+                    ? 'bg-amber-500 border-amber-500 text-white shadow-lg shadow-amber-200 dark:shadow-amber-900/40'
+                    : 'border-amber-300 dark:border-amber-700/50 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+                  }`}
+              >
+                <Icon name="account_balance_wallet" className="text-lg" />
+                <span>Tài sản</span>
+                {showAssetsMode && (
+                  <span className="text-xs bg-white/30 rounded-full px-1.5 py-0.5">{students.length} HS</span>
+                )}
+              </button>
+
               {/* Reset Button */}
               <button
                 onClick={handleReset}
@@ -423,6 +544,46 @@ const Violations = () => {
               </button>
             </div>
           </div>
+
+          {/* ── Assets mode action bar ─────────────────────────────────────── */}
+          {showAssetsMode && (
+            <div className="flex items-center justify-between gap-4 px-5 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40">
+              <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-semibold text-sm">
+                <Icon name="account_balance_wallet" />
+                <span>
+                  Chế độ chỉnh sửa tài sản —{' '}
+                  <strong>{students.length}</strong> học sinh
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSaveAllAssets}
+                  disabled={isSavingAll}
+                  className="flex items-center gap-2 px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSavingAll ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                      <span>Đang lưu...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="save" />
+                      <span>Lưu tất cả</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowAssetsMode(false)}
+                  disabled={isSavingAll}
+                  className="flex items-center gap-1 px-3 py-2 rounded-lg border border-amber-300 dark:border-amber-700/50 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 font-semibold text-sm transition-all disabled:opacity-50"
+                >
+                  <Icon name="close" />
+                  <span>Đóng</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Student Cards */}
           {overviewMode ? (
@@ -477,9 +638,9 @@ const Violations = () => {
               {getSortedStudents().map((student, index) => (
                 <div
                   key={student.uid}
-                  className="clay-card p-4 hover:shadow-md transition-all"
+                  className={`clay-card p-4 hover:shadow-md transition-all ${showAssetsMode ? 'ring-1 ring-amber-300 dark:ring-amber-700/50' : ''}`}
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 flex-wrap">
                     {/* Avatar */}
                     <div className="flex-shrink-0">
                       {student.avatar ? (
@@ -501,7 +662,7 @@ const Violations = () => {
                         <span className="text-[#608a67] dark:text-[#8ba890] mr-2">{index + 1}.</span>
                         {student.fullName}
                       </h3>
-                      <div className="flex items-center gap-3 mt-1 text-sm">
+                      <div className="flex items-center gap-3 mt-1 text-sm flex-wrap">
                         <span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1">
                           <Icon name="money_off" className="text-base" />
                           Nợ: {student.penaltyDebt || 0}k
@@ -514,10 +675,27 @@ const Violations = () => {
                           <Icon name="warning" className="text-base" />
                           Tổng: {student.totalViolationAmount || 0}k
                         </span>
+                        {/* Asset display (read-only) when NOT in assets mode */}
+                        {!showAssetsMode && (
+                          <>
+                            <span className="text-green-700 dark:text-green-400 flex items-center gap-1">
+                              <Icon name="star" className="text-sm" />
+                              {student.totalBehaviorPoints ?? 0} đ
+                            </span>
+                            <span className="text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
+                              <CoinIcon size={14} />
+                              {student.coins ?? 0}
+                            </span>
+                            <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                              <GoldIcon size={14} />
+                              {student.gold ?? 0}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
 
-                    {/* Input fields */}
+                    {/* Violation + Payment input fields */}
                     <div className="flex gap-2">
                       <input
                         ref={(el) => violationInputRefs.current[student.uid] = el}
@@ -526,7 +704,7 @@ const Violations = () => {
                         value={violationInputs[student.uid] || ''}
                         onChange={(e) => handleViolationChange(student.uid, e.target.value)}
                         onKeyDown={(e) => handleViolationKeyDown(e, student.uid)}
-                        className="w-34 px-3 py-2 rounded-lg border-2 border-red-300 dark:border-red-700/50 bg-white dark:bg-white/5 text-[#111812] dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                        className="w-28 px-3 py-2 rounded-lg border-2 border-red-300 dark:border-red-700/50 bg-white dark:bg-white/5 text-[#111812] dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
                       />
                       <input
                         ref={(el) => paymentInputRefs.current[student.uid] = el}
@@ -535,9 +713,68 @@ const Violations = () => {
                         value={paymentInputs[student.uid] || ''}
                         onChange={(e) => handlePaymentChange(student.uid, e.target.value)}
                         onKeyDown={(e) => handlePaymentKeyDown(e, student.uid)}
-                        className="w-34 px-3 py-2 rounded-lg border-2 border-green-300 dark:border-green-700/50 bg-white dark:bg-white/5 text-[#111812] dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                        className="w-28 px-3 py-2 rounded-lg border-2 border-green-300 dark:border-green-700/50 bg-white dark:bg-white/5 text-[#111812] dark:text-white text-center font-bold focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
                       />
                     </div>
+
+                    {/* Asset inputs (only in assets mode) */}
+                    {showAssetsMode && assetsForms[student.uid] && (() => {
+                      const form = assetsForms[student.uid];
+                      const isSavingThis = savingUid === student.uid;
+                      return (
+                        <div className="flex items-center gap-2 pl-2 border-l-2 border-amber-300 dark:border-amber-700/50">
+                          <div className="flex flex-col items-center gap-0.5">
+                            <label className="text-xs font-bold text-green-700 dark:text-green-400 flex items-center gap-0.5">
+                              <Icon name="star" className="text-xs" />Điểm
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={form.totalBehaviorPoints}
+                              onChange={(e) => handleAssetsFormChange(student.uid, 'totalBehaviorPoints', e.target.value)}
+                              disabled={isSavingThis || isSavingAll}
+                              className="w-20 px-2 py-1.5 rounded-lg border border-green-300 dark:border-green-700/50 bg-white dark:bg-white/10 text-[#111812] dark:text-white focus:outline-none focus:ring-2 focus:ring-green-400 font-bold text-sm text-center disabled:opacity-50"
+                            />
+                          </div>
+                          <div className="flex flex-col items-center gap-0.5">
+                            <label className="text-xs font-bold text-yellow-600 dark:text-yellow-400 flex items-center gap-0.5">
+                              <CoinIcon size={12} />Xu
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={form.coins}
+                              onChange={(e) => handleAssetsFormChange(student.uid, 'coins', e.target.value)}
+                              disabled={isSavingThis || isSavingAll}
+                              className="w-20 px-2 py-1.5 rounded-lg border border-yellow-300 dark:border-yellow-700/50 bg-white dark:bg-white/10 text-[#111812] dark:text-white focus:outline-none focus:ring-2 focus:ring-yellow-400 font-bold text-sm text-center disabled:opacity-50"
+                            />
+                          </div>
+                          <div className="flex flex-col items-center gap-0.5">
+                            <label className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-0.5">
+                              <GoldIcon size={12} />Vàng
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={form.gold}
+                              onChange={(e) => handleAssetsFormChange(student.uid, 'gold', e.target.value)}
+                              disabled={isSavingThis || isSavingAll}
+                              className="w-20 px-2 py-1.5 rounded-lg border border-amber-300 dark:border-amber-700/50 bg-white dark:bg-white/10 text-[#111812] dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-400 font-bold text-sm text-center disabled:opacity-50"
+                            />
+                          </div>
+                          <button
+                            onClick={() => handleSaveOneAsset(student)}
+                            disabled={isSavingThis || isSavingAll}
+                            title="Lưu tài sản học sinh này"
+                            className="mt-4 p-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {isSavingThis
+                              ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-amber-500 border-t-transparent" />
+                              : <Icon name="save" className="text-base" />}
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               ))}
