@@ -3,7 +3,7 @@ import { getAllAssignments, deleteAssignment } from '../../services/assignmentSe
 import { getExamById } from '../../services/examBankService';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../config/firebase';
-import { getAllClasses } from '../../services/classService';
+import { getAllClasses, getClassStudents } from '../../services/classService';
 import Icon from '../../components/common/Icon';
 import Toast from '../../components/common/Toast';
 import ConfirmModal from '../../components/common/ConfirmModal';
@@ -19,6 +19,7 @@ const GradeSubmissions = () => {
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+  const [studentNameMap, setStudentNameMap] = useState({});
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [assignmentToDelete, setAssignmentToDelete] = useState(null);
   const [toast, setToast] = useState(null);
@@ -96,6 +97,14 @@ const GradeSubmissions = () => {
   const handleViewSubmissions = async (assignment) => {
     setSelectedAssignment(assignment);
     setLoadingSubmissions(true);
+
+    // Load student name map for this class
+    const classStudentsResult = await getClassStudents(assignment.classId);
+    if (classStudentsResult.success) {
+      const map = {};
+      classStudentsResult.students.forEach(s => { map[s.uid] = s.fullName; });
+      setStudentNameMap(map);
+    }
 
     try {
       const submissionsRef = collection(db, 'examSubmissions');
@@ -226,7 +235,7 @@ const GradeSubmissions = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
                     <h3 className="font-bold text-[#111812] dark:text-white mb-1">
-                      {submission.studentName}
+                      {studentNameMap[submission.studentUid] || submission.studentName}
                     </h3>
                     <div className="flex items-center gap-3 text-sm text-[#608a67] dark:text-[#8ba890]">
                       <span className="flex items-center gap-1">

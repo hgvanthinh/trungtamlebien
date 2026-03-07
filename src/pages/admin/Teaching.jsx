@@ -807,7 +807,7 @@ const Teaching = () => {
                       </div>
                       <div className="flex items-center gap-1.5 text-[14px]">
                         <span className="text-fuchsia-800 dark:text-fuchsia-500 font-bold">
-                          {student.studyPoints == null || student.studyPoints === 'Vắng' || typeof student.studyPoints !== 'number' ? 'Vắng' : student.studyPoints.toFixed(2) + ' điểm'}
+                          {student.studyPoints == null || student.studyPoints === 'Vắng' || typeof student.studyPoints !== 'number' ? (student.studyPoints === 'Vắng' ? 'Vắng' : '') : student.studyPoints.toFixed(2) + ' điểm'}
                         </span>
                       </div>
                     </div>
@@ -898,7 +898,7 @@ const Teaching = () => {
                             <div className="transform scale-75 origin-center flex items-center">
                               <Icon name="bolt" />
                             </div>
-                            {student.studyPoints == null || student.studyPoints === 'Vắng' || typeof student.studyPoints !== 'number' ? 'Vắng' : student.studyPoints.toFixed(2) + ' điểm'}
+                            {student.studyPoints == null || student.studyPoints === 'Vắng' || typeof student.studyPoints !== 'number' ? (student.studyPoints === 'Vắng' ? 'Vắng' : '') : student.studyPoints.toFixed(2) + ' điểm'}
                           </span>
                         </div>
                       </div>

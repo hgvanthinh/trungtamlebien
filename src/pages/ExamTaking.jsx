@@ -526,8 +526,8 @@ const ExamTaking = () => {
 
       const result = await submitMixedExam(examId, mixedAnswers, {
         studentUid: currentUser.uid,
-        studentName: userProfile?.displayName || currentUser.email,
-        classId: userProfile?.classId || '',
+        studentName: userProfile?.fullName || currentUser.email,
+        classId: userProfile?.classes?.[0] || '',
         assignmentId: assignmentId
       });
 

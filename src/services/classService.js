@@ -288,7 +288,7 @@ export const getClassStudents = async (classId) => {
     const studentsResults = await Promise.all(studentPromises);
     const students = studentsResults.filter(s => s !== null);
 
-    return { success: true, students };
+    return { success: true, students, totalPayment: classData.totalPayment || 0 };
   } catch (error) {
     console.error('Error getting class students:', error);
     return { success: false, error: error.message || 'Lỗi khi lấy danh sách học sinh' };
@@ -508,6 +508,18 @@ export const resetViolations = async (studentUids) => {
   } catch (error) {
     console.error('Error resetting violations:', error);
     return { success: false, error: error.message || 'Lỗi khi reset vi phạm' };
+  }
+};
+
+export const saveClassTotalPayment = async (classId, totalPayment) => {
+  try {
+    checkAdminPermission();
+    const classRef = doc(db, 'classes', classId);
+    await updateDoc(classRef, { totalPayment });
+    return { success: true };
+  } catch (error) {
+    console.error('Error saving class total payment:', error);
+    return { success: false, error: error.message };
   }
 };
 

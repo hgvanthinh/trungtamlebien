@@ -15,14 +15,14 @@
  * @param {number} questionCounts.shortAnswer - Short answer count (0-6)
  * @returns {Object} Points per question for each type + total max score
  */
-export function calculateDynamicPoints(questionCounts) {
+export function calculateDynamicPoints(questionCounts, customBudgets = {}) {
   const { abcd = 0, trueFalse = 0, shortAnswer = 0 } = questionCounts;
 
-  // Fixed section budgets — tỉ lệ 3-4-3 không đổi dù số câu thay đổi
+  // Section budgets — default 3-4-3, có thể tùy chỉnh
   const sectionBudgets = {
-    abcd: 3,        // Luôn 3đ cho toàn bộ phần ABCD
-    trueFalse: 4,   // Luôn 4đ cho toàn bộ phần Đúng/Sai
-    shortAnswer: 3  // Luôn 3đ cho toàn bộ phần Tự luận ngắn
+    abcd: customBudgets.abcd ?? 3,
+    trueFalse: customBudgets.trueFalse ?? 4,
+    shortAnswer: customBudgets.shortAnswer ?? 3,
   };
 
   // Prevent division by zero

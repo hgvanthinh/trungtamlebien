@@ -3,7 +3,7 @@ import Icon from '../../components/common/Icon';
 import Toast from '../../components/common/Toast';
 import CoinIcon from '../../components/common/CoinIcon';
 import GoldIcon from '../../components/common/GoldIcon';
-import { getAllClasses, getClassStudents, saveViolations, resetViolations } from '../../services/classService';
+import { getAllClasses, getClassStudents, saveViolations, resetViolations, saveClassTotalPayment } from '../../services/classService';
 import { db } from '../../config/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 
@@ -33,6 +33,8 @@ const Violations = () => {
 
   // Tổng cả lớp (tổng tiền nộp phạt trong session)
   const [classTotalPayment, setClassTotalPayment] = useState(0);
+  const [showUseBox, setShowUseBox] = useState(false);
+  const [useAmount, setUseAmount] = useState('');
 
   // ── Asset editing mode ──────────────────────────────────────────────────────
   const [showAssetsMode, setShowAssetsMode] = useState(false);
@@ -64,6 +66,10 @@ const Violations = () => {
   useEffect(() => {
     setShowAssetsMode(false);
     setAssetsForms({});
+    setClassTotalPayment(0);
+    setViolationInputs({});
+    setPaymentInputs({});
+    setShowUseBox(false);
   }, [selectedClassId]);
 
   const handleAssetsFormChange = (uid, field, value) => {
@@ -195,6 +201,7 @@ const Violations = () => {
     const result = await getClassStudents(selectedClassId);
     if (result.success) {
       setStudents(result.students);
+      setClassTotalPayment(result.totalPayment || 0);
     }
     setLoading(false);
   };
@@ -293,8 +300,19 @@ const Violations = () => {
   };
 
   const handleUseClassTotal = () => {
-    setClassTotalPayment(0);
-    setToast({ message: 'Đã sử dụng tổng tiền cả lớp', type: 'success' });
+    setUseAmount('');
+    setShowUseBox(true);
+  };
+
+  const handleConfirmUse = async () => {
+    const amount = parseInt(useAmount) || 0;
+    if (amount <= 0) return;
+    const newTotal = Math.max(0, classTotalPayment - amount);
+    setClassTotalPayment(newTotal);
+    await saveClassTotalPayment(selectedClassId, newTotal);
+    setToast({ message: `Đã trừ ${amount}k khỏi tổng`, type: 'success' });
+    setShowUseBox(false);
+    setUseAmount('');
   };
 
   const handleSave = async () => {
@@ -328,6 +346,8 @@ const Violations = () => {
       const result = await saveViolations(violations, payments);
 
       if (result.success) {
+        // Lưu tổng cả lớp lên Firebase
+        await saveClassTotalPayment(selectedClassId, classTotalPayment);
         setToast({ message: 'Đã cập nhật thông tin vi phạm thành công!', type: 'success' });
         // Reset inputs
         setViolationInputs({});
@@ -362,6 +382,7 @@ const Violations = () => {
       const result = await resetViolations(studentUids);
 
       if (result.success) {
+        await saveClassTotalPayment(selectedClassId, 0);
         setToast({ message: 'Đã reset thông tin vi phạm thành công!', type: 'success' });
         setViolationInputs({});
         setPaymentInputs({});
@@ -423,7 +444,7 @@ const Violations = () => {
               </h2>
 
               {/* Tổng cả lớp */}
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700/50">
+              <div className="relative flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700/50">
                 <Icon name="account_balance_wallet" className="text-blue-600 dark:text-blue-400" />
                 <span className="text-sm font-medium text-[#111812] dark:text-white">
                   Tổng cả lớp: <span className="font-bold text-blue-600 dark:text-blue-400">{classTotalPayment}k</span>
@@ -435,6 +456,36 @@ const Violations = () => {
                 >
                   Sử dụng
                 </button>
+
+                {/* Popup nhập số tiền sử dụng */}
+                {showUseBox && (
+                  <div className="absolute top-full left-0 mt-2 z-20 flex items-center gap-2 px-3 py-2 rounded-xl bg-white dark:bg-[#1a2e1e] border border-blue-300 dark:border-blue-700 shadow-lg">
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Số tiền (k)"
+                      value={useAmount}
+                      onChange={e => setUseAmount(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleConfirmUse(); if (e.key === 'Escape') setShowUseBox(false); }}
+                      autoFocus
+                      className="w-28 px-2 py-1 rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-white/10 text-[#111812] dark:text-white text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                    <span className="text-sm text-gray-500">k</span>
+                    <button
+                      onClick={handleConfirmUse}
+                      disabled={!useAmount || parseInt(useAmount) <= 0}
+                      className="px-2 py-1 rounded-lg bg-blue-500 text-white text-xs font-bold hover:bg-blue-600 transition-all disabled:opacity-50"
+                    >
+                      Trừ
+                    </button>
+                    <button
+                      onClick={() => setShowUseBox(false)}
+                      className="px-2 py-1 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10 text-xs transition-all"
+                    >
+                      Huỷ
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 

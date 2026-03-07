@@ -22,6 +22,21 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
   // Short Answer - { 1: ['answer1', 'answer2'], 2: ['answer'], ... }
   const [shortAnswerQuestions, setShortAnswerQuestions] = useState({});
 
+  // Section budgets (điểm từng phần, GV tự nhập)
+  const [sectionBudgets, setSectionBudgets] = useState({
+    abcd: 3,
+    trueFalse: 4,
+    shortAnswer: 3,
+  });
+
+  const handleBudgetChange = (section, value) => {
+    const num = parseFloat(value);
+    setSectionBudgets(prev => ({
+      ...prev,
+      [section]: isNaN(num) || num < 0 ? 0 : num,
+    }));
+  };
+
   // Settings
   const [caseSensitive, setCaseSensitive] = useState(false);
 
@@ -81,8 +96,8 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
 
   // Calculate dynamic points
   const dynamicPoints = useMemo(() => {
-    return calculateDynamicPoints(questionCounts);
-  }, [questionCounts]);
+    return calculateDynamicPoints(questionCounts, sectionBudgets);
+  }, [questionCounts, sectionBudgets]);
 
   // Total questions and validation
   const totalQuestions = questionCounts.abcd + questionCounts.trueFalse + questionCounts.shortAnswer;
@@ -167,9 +182,9 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
 
       // Build question types config
       const questionTypes = {
-        abcd: { count: questionCounts.abcd },
-        trueFalse: { count: questionCounts.trueFalse },
-        shortAnswer: { count: questionCounts.shortAnswer }
+        abcd: { count: questionCounts.abcd, budget: sectionBudgets.abcd },
+        trueFalse: { count: questionCounts.trueFalse, budget: sectionBudgets.trueFalse },
+        shortAnswer: { count: questionCounts.shortAnswer, budget: sectionBudgets.shortAnswer },
       };
 
       // Settings
@@ -320,10 +335,21 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
                     TRẮC NGHIỆM ABCD
                   </h3>
                   <p className="text-xs text-gray-500 mt-1">
-                    Tối đa 12 câu — Cả phần: <strong>3đ</strong> — Mỗi câu: {formatPoints(dynamicPoints.abcd)}đ
+                    Tối đa 12 câu — Mỗi câu: {formatPoints(dynamicPoints.abcd)}đ
                   </p>
                 </div>
-                <Icon name={expandedSections.abcd ? 'expand_less' : 'expand_more'} />
+                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={sectionBudgets.abcd}
+                    onChange={e => handleBudgetChange('abcd', e.target.value)}
+                    className="clay-input w-16 px-2 py-1 text-sm text-center rounded-lg"
+                  />
+                  <span className="text-sm text-gray-500">đ</span>
+                  <Icon name={expandedSections.abcd ? 'expand_less' : 'expand_more'} />
+                </div>
               </button>
 
               {expandedSections.abcd && (
@@ -350,14 +376,25 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
                     ĐÚNG/SAI
                   </h3>
                   <p className="text-xs text-gray-500 mt-1">
-                    Tối đa 4 câu × 4 ý — Cả phần: <strong>4đ</strong> — Mỗi câu: {formatPoints(dynamicPoints.trueFalse)}đ
+                    Tối đa 4 câu × 4 ý — Mỗi câu: {formatPoints(dynamicPoints.trueFalse)}đ
                     <br />
                     <span className="text-[10px]">
                       Chấm điểm: 4/4=1đ, 3/4=0.5đ, 2/4=0.25đ, 1/4=0.1đ (nhân với điểm câu)
                     </span>
                   </p>
                 </div>
-                <Icon name={expandedSections.trueFalse ? 'expand_less' : 'expand_more'} />
+                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={sectionBudgets.trueFalse}
+                    onChange={e => handleBudgetChange('trueFalse', e.target.value)}
+                    className="clay-input w-16 px-2 py-1 text-sm text-center rounded-lg"
+                  />
+                  <span className="text-sm text-gray-500">đ</span>
+                  <Icon name={expandedSections.trueFalse ? 'expand_less' : 'expand_more'} />
+                </div>
               </button>
 
               {expandedSections.trueFalse && (
@@ -384,10 +421,21 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
                     TRẢ LỜI NGẮN
                   </h3>
                   <p className="text-xs text-gray-500 mt-1">
-                    Tối đa 6 câu — Cả phần: <strong>3đ</strong> — Mỗi câu: {formatPoints(dynamicPoints.shortAnswer)}đ
+                    Tối đa 6 câu — Mỗi câu: {formatPoints(dynamicPoints.shortAnswer)}đ
                   </p>
                 </div>
-                <Icon name={expandedSections.shortAnswer ? 'expand_less' : 'expand_more'} />
+                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={sectionBudgets.shortAnswer}
+                    onChange={e => handleBudgetChange('shortAnswer', e.target.value)}
+                    className="clay-input w-16 px-2 py-1 text-sm text-center rounded-lg"
+                  />
+                  <span className="text-sm text-gray-500">đ</span>
+                  <Icon name={expandedSections.shortAnswer ? 'expand_less' : 'expand_more'} />
+                </div>
               </button>
 
               {expandedSections.shortAnswer && (
@@ -419,7 +467,7 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
               <h4 className="font-bold text-lg text-[#111812] dark:text-white mb-2">
                 TỔNG ĐIỂM TỐI ĐA: {formatPoints(dynamicPoints.total)}đ
                 <span className="text-sm font-normal text-gray-500 ml-2">
-                  (ABCD {questionCounts.abcd > 0 ? '3đ' : '0đ'} + Đ/S {questionCounts.trueFalse > 0 ? '4đ' : '0đ'} + TLN {questionCounts.shortAnswer > 0 ? '3đ' : '0đ'})
+                  (ABCD {questionCounts.abcd > 0 ? `${formatPoints(sectionBudgets.abcd)}đ` : '0đ'} + Đ/S {questionCounts.trueFalse > 0 ? `${formatPoints(sectionBudgets.trueFalse)}đ` : '0đ'} + TLN {questionCounts.shortAnswer > 0 ? `${formatPoints(sectionBudgets.shortAnswer)}đ` : '0đ'})
                 </span>
               </h4>
               <p className="text-sm text-gray-700 dark:text-gray-300">
