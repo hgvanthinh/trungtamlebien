@@ -30,13 +30,13 @@ const GradeStats = () => {
         // Return cache nếu đã có
         if (submissionsCache[classId]) return submissionsCache[classId];
 
-        const uploadForClass = assignmentsList.filter(
-            a => a.classId === classId && examMap[a.examId]?.type === 'upload'
+        const assignmentsForClass = assignmentsList.filter(
+            a => a.classId === classId
         );
 
         const results = [];
         await Promise.all(
-            uploadForClass.map(async assignment => {
+            assignmentsForClass.map(async assignment => {
                 const q = query(
                     collection(db, 'examSubmissions'),
                     where('assignmentId', '==', assignment.id)
@@ -107,9 +107,9 @@ const GradeStats = () => {
             setExams(examMap);
             setAssignments(allAssignmentsList);
 
-            // Lấy lớp đầu tiên có bài tự luận làm default filter
-            const uploadAssignments = allAssignmentsList.filter(a => examMap[a.examId]?.type === 'upload');
-            const firstClassId = uploadAssignments.length > 0 ? uploadAssignments[0].classId : '';
+            // Lấy lớp đầu tiên có bài làm default filter
+            const validAssignments = allAssignmentsList.filter(a => !examMap[a.examId]?.deleted);
+            const firstClassId = validAssignments.length > 0 ? validAssignments[0].classId : '';
 
             if (firstClassId) {
                 setFilterClass(firstClassId);
@@ -142,9 +142,9 @@ const GradeStats = () => {
     };
 
     // --- Derived filtered data ---
-    const uploadAssignments = assignments.filter(a => {
+    const allValidAssignments = assignments.filter(a => {
         const exam = exams[a.examId];
-        return exam?.type === 'upload';
+        return !exam?.deleted;
     });
 
     // allSubmissions chỉ chứa data của lớp đang chọn → lọc thêm theo bài giao nếu cần
@@ -154,15 +154,27 @@ const GradeStats = () => {
 
     // Assignments visible in filter — chỉ show bài của lớp đang chọn
     const visibleAssignments = filterClass
-        ? uploadAssignments.filter(a => a.classId === filterClass)
-        : uploadAssignments;
+        ? allValidAssignments.filter(a => a.classId === filterClass)
+        : allValidAssignments;
 
     // Stats calculation
     const gradedSubs = filteredSubmissions.filter(s => s.status === 'graded');
-    const scores = gradedSubs.map(s => s.totalScore || 0);
-    const avg = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : '-';
-    const maxScore = scores.length > 0 ? Math.max(...scores) : '-';
-    const minScore = scores.length > 0 ? Math.min(...scores) : '-';
+    const scores = gradedSubs.map(s => {
+        const exam = exams[s.examId];
+        if (exam?.type !== 'upload') {
+            return ((s.totalScore || 0) / (s.maxScore || 1)) * 10;
+        }
+        return s.totalScore || 0;
+    });
+
+    const formatScore = (val) => {
+        const num = parseFloat(val);
+        return Number.isInteger(num) ? num : num.toFixed(2);
+    };
+
+    const avg = scores.length > 0 ? formatScore(scores.reduce((a, b) => a + b, 0) / scores.length) : '-';
+    const maxScore = scores.length > 0 ? formatScore(Math.max(...scores)) : '-';
+    const minScore = scores.length > 0 ? formatScore(Math.min(...scores)) : '-';
 
     // Group by student for table
     // Each row = 1 submission, showing student + class + assignment + score + status
@@ -292,7 +304,7 @@ const GradeStats = () => {
                         Không có dữ liệu
                     </h3>
                     <p className="text-[#608a67] dark:text-[#8ba890]">
-                        Chưa có bài tự luận nào được chấm với bộ lọc hiện tại
+                        Chưa có bài nào được chấm với bộ lọc hiện tại
                     </p>
                 </div>
             ) : (
@@ -353,17 +365,23 @@ const GradeStats = () => {
                                                         : 'text-gray-400 dark:text-gray-600'
                                                         }`}
                                                 >
-                                                    {sub.status === 'graded' ? sub.totalScore ?? '-' : '–'}
+                                                    {sub.status === 'graded'
+                                                        ? (exam?.type !== 'upload' ? `${sub.totalScore || 0}/${sub.maxScore || 0}` : (sub.totalScore ?? '-'))
+                                                        : '–'}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3 text-center">
-                                                <button
-                                                    onClick={() => navigate(`/admin/grade-submissions/${sub.id}`)}
-                                                    className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg text-sm font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all"
-                                                >
-                                                    <Icon name="grading" className="inline mr-1 text-sm" />
-                                                    {sub.status === 'graded' ? 'Xem lại' : 'Chấm'}
-                                                </button>
+                                                {exam?.type === 'upload' ? (
+                                                    <button
+                                                        onClick={() => navigate(`/admin/grade-submissions/${sub.id}`)}
+                                                        className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg text-sm font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all"
+                                                    >
+                                                        <Icon name="grading" className="inline mr-1 text-sm" />
+                                                        {sub.status === 'graded' ? 'Xem lại' : 'Chấm'}
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-xs font-medium px-2 py-1 bg-gray-100 dark:bg-gray-800 text-[#608a67] dark:text-[#8ba890] rounded-lg">Tự động chấm</span>
+                                                )}
                                             </td>
                                         </tr>
                                     );
