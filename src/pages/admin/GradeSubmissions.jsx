@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getAllAssignments, deleteAssignment } from '../../services/assignmentService';
 import { getExamById } from '../../services/examBankService';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, increment } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { getAllClasses, getClassStudents } from '../../services/classService';
 import Icon from '../../components/common/Icon';
@@ -20,9 +20,12 @@ const GradeSubmissions = () => {
   const [submissions, setSubmissions] = useState([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
   const [studentNameMap, setStudentNameMap] = useState({});
+  const [classStudents, setClassStudents] = useState([]);
+  const [filterStatus, setFilterStatus] = useState('submitted');
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [assignmentToDelete, setAssignmentToDelete] = useState(null);
   const [toast, setToast] = useState(null);
+  const [isConverting, setIsConverting] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -31,49 +34,56 @@ const GradeSubmissions = () => {
   const loadData = async () => {
     setLoading(true);
 
-    // Load assignments
-    const assignmentsResult = await getAllAssignments();
-    if (assignmentsResult.success) {
-      setAssignments(assignmentsResult.assignments);
+    // Load assignments + classes song song
+    const [assignmentsResult, classesResult] = await Promise.all([
+      getAllAssignments(),
+      getAllClasses(),
+    ]);
 
-      // Load exam details - only fetch if exam still exists
-      const examDetails = {};
-      for (const assignment of assignmentsResult.assignments) {
-        // Try to get exam details, but don't fail if exam is deleted
-        const examResult = await getExamById(assignment.examId);
-        if (examResult.success) {
-          examDetails[assignment.examId] = examResult.exam;
-        } else {
-          // If exam is deleted, create a placeholder with info from assignment
-          examDetails[assignment.examId] = {
-            title: assignment.examTitle || 'Đề thi đã bị xóa',
-            type: assignment.examType || 'upload',
-            deleted: true
-          };
-        }
-      }
-      setExams(examDetails);
-
-      // Load submission counts
-      const counts = {};
-      for (const assignment of assignmentsResult.assignments) {
-        const count = await getSubmissionCount(assignment.id);
-        counts[assignment.id] = count;
-      }
-      setSubmissionCounts(counts);
-    }
-
-    // Load classes
-    const classesResult = await getAllClasses();
+    // Cập nhật classes ngay
     if (classesResult.success) {
       const classMap = {};
-      classesResult.classes.forEach(cls => {
-        classMap[cls.id] = cls;
-      });
+      classesResult.classes.forEach(cls => { classMap[cls.id] = cls; });
       setClasses(classMap);
     }
 
-    setLoading(false);
+    if (assignmentsResult.success) {
+      const assignmentsList = assignmentsResult.assignments;
+      setAssignments(assignmentsList);
+      setLoading(false); // ✅ Hiện danh sách ngay, không chờ exam/count
+
+      // Dedupe examIds để không gọi lại cùng 1 exam nhiều lần
+      const uniqueExamIds = [...new Set(assignmentsList.map(a => a.examId))];
+
+      // Load tất cả exam details song song
+      const examResults = await Promise.all(
+        uniqueExamIds.map(examId => getExamById(examId))
+      );
+      const examDetails = {};
+      uniqueExamIds.forEach((examId, i) => {
+        const res = examResults[i];
+        if (res.success) {
+          examDetails[examId] = res.exam;
+        } else {
+          const fallback = assignmentsList.find(a => a.examId === examId);
+          examDetails[examId] = {
+            title: fallback?.examTitle || 'Đề thi đã bị xóa',
+            type: fallback?.examType || 'upload',
+            deleted: true,
+          };
+        }
+      });
+      setExams(examDetails);
+
+      // Lazy stream submission counts — cập nhật từng cái khi có kết quả
+      assignmentsList.forEach(assignment => {
+        getSubmissionCount(assignment.id).then(count => {
+          setSubmissionCounts(prev => ({ ...prev, [assignment.id]: count }));
+        });
+      });
+    } else {
+      setLoading(false);
+    }
   };
 
   const getSubmissionCount = async (assignmentId) => {
@@ -81,8 +91,6 @@ const GradeSubmissions = () => {
       const submissionsRef = collection(db, 'examSubmissions');
       const q = query(submissionsRef, where('assignmentId', '==', assignmentId));
       const snapshot = await getDocs(q);
-
-      // Đếm số học sinh unique (không đếm trùng nếu 1 HS nộp nhiều lần)
       const uniqueStudents = new Set();
       snapshot.docs.forEach(doc => {
         uniqueStudents.add(doc.data().studentUid);
@@ -96,14 +104,18 @@ const GradeSubmissions = () => {
 
   const handleViewSubmissions = async (assignment) => {
     setSelectedAssignment(assignment);
+    setFilterStatus('submitted');
     setLoadingSubmissions(true);
 
     // Load student name map for this class
     const classStudentsResult = await getClassStudents(assignment.classId);
     if (classStudentsResult.success) {
+      setClassStudents(classStudentsResult.students);
       const map = {};
       classStudentsResult.students.forEach(s => { map[s.uid] = s.fullName; });
       setStudentNameMap(map);
+    } else {
+      setClassStudents([]);
     }
 
     try {
@@ -155,6 +167,70 @@ const GradeSubmissions = () => {
     setShowConfirmDelete(false);
   };
 
+  const handleConvertToPoints = async () => {
+    if (!submissions || submissions.length === 0) {
+      setToast({ type: 'warning', message: 'Không có bài nộp nào để quy đổi' });
+      return;
+    }
+
+    const examType = exams[selectedAssignment?.examId]?.type;
+    const unconvertedSubmissions = submissions.filter(s => {
+      if (s.convertedToPoints) return false;
+      const score = examType === 'upload' ? (s.totalScore || 0) : ((s.totalScore / (s.maxScore || 1)) * 10);
+      return score > 0;
+    });
+
+    if (unconvertedSubmissions.length === 0) {
+      setToast({ type: 'info', message: 'Tất cả bài nộp có điểm đã được quy đổi' });
+      return;
+    }
+
+    setIsConverting(true);
+    let successCount = 0;
+    const updatePromises = [];
+
+    try {
+      for (const submission of unconvertedSubmissions) {
+        // Prepare score logic
+        const score = examType === 'upload' ? (submission.totalScore || 0) : ((submission.totalScore / (submission.maxScore || 1)) * 10);
+        const pointsToAdd = Math.floor(score * 2);
+
+        if (pointsToAdd > 0) {
+          // Update user accumulative points
+          const userRef = doc(db, 'users', submission.studentUid);
+          updatePromises.push(updateDoc(userRef, {
+            totalBehaviorPoints: increment(pointsToAdd)
+          }));
+
+          // Mark submission as converted
+          const submissionRef = doc(db, 'examSubmissions', submission.id);
+          updatePromises.push(updateDoc(submissionRef, {
+            convertedToPoints: true
+          }));
+
+          successCount++;
+        }
+      }
+
+      await Promise.all(updatePromises);
+
+      // Update local state
+      setSubmissions(prev => prev.map(s => {
+        if (unconvertedSubmissions.find(us => us.id === s.id)) {
+          return { ...s, convertedToPoints: true };
+        }
+        return s;
+      }));
+
+      setToast({ type: 'success', message: `Đã quy đổi điểm cho ${successCount} học sinh` });
+    } catch (error) {
+      console.error('Error converting to points:', error);
+      setToast({ type: 'error', message: 'Lỗi khi quy đổi điểm sang điểm tích luỹ' });
+    } finally {
+      setIsConverting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col gap-6 p-6">
@@ -170,6 +246,24 @@ const GradeSubmissions = () => {
   if (selectedAssignment) {
     const exam = exams[selectedAssignment.examId];
     const cls = classes[selectedAssignment.classId];
+
+    // Filter submissions
+    const submittedUids = new Set(submissions.map(s => s.studentUid));
+    const notSubmittedList = classStudents
+      .filter(s => !submittedUids.has(s.uid))
+      .map(s => ({
+        isNotSubmitted: true,
+        studentUid: s.uid,
+        studentName: s.fullName || 'Học sinh chưa có tên',
+        id: `unsubmitted-${s.uid}`
+      }));
+
+    let displayedList = submissions;
+    if (filterStatus === 'not_submitted') {
+      displayedList = notSubmittedList;
+    } else if (filterStatus === 'all') {
+      displayedList = [...submissions, ...notSubmittedList];
+    }
 
     return (
       <div className="flex flex-col gap-6 p-6">
@@ -189,26 +283,47 @@ const GradeSubmissions = () => {
               Lớp: {cls?.name} • Hạn: {selectedAssignment.deadline?.toDate().toLocaleDateString('vi-VN')}
             </p>
           </div>
+          <button
+            onClick={handleConvertToPoints}
+            disabled={isConverting}
+            className="px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 rounded-xl font-bold hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isConverting ? (
+              <div className="w-5 h-5 border-2 border-yellow-600 dark:border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              <Icon name="generating_tokens" />
+            )}
+            Quy đổi sang điểm tích lũy
+          </button>
         </div>
 
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="clay-card p-4">
+          <div
+            onClick={() => setFilterStatus('all')}
+            className={`clay-card p-4 cursor-pointer transition-all ${filterStatus === 'all' ? 'ring-2 ring-primary bg-primary/5 dark:bg-primary/10' : 'hover:-translate-y-1 hover:shadow-lg'}`}
+          >
             <p className="text-sm text-[#608a67] dark:text-[#8ba890] mb-1">Tổng HS</p>
             <p className="text-2xl font-bold text-[#111812] dark:text-white">
-              {cls?.studentCount || 0}
+              {classStudents.length || cls?.studentCount || 0}
             </p>
           </div>
-          <div className="clay-card p-4">
+          <div
+            onClick={() => setFilterStatus('submitted')}
+            className={`clay-card p-4 cursor-pointer transition-all ${filterStatus === 'submitted' ? 'ring-2 ring-green-500 bg-green-50 dark:bg-green-900/10' : 'hover:-translate-y-1 hover:shadow-lg'}`}
+          >
             <p className="text-sm text-[#608a67] dark:text-[#8ba890] mb-1">Đã nộp</p>
             <p className="text-2xl font-bold text-green-600 dark:text-green-400">
               {submissions.length}
             </p>
           </div>
-          <div className="clay-card p-4">
+          <div
+            onClick={() => setFilterStatus('not_submitted')}
+            className={`clay-card p-4 cursor-pointer transition-all ${filterStatus === 'not_submitted' ? 'ring-2 ring-red-500 bg-red-50 dark:bg-red-900/10' : 'hover:-translate-y-1 hover:shadow-lg'}`}
+          >
             <p className="text-sm text-[#608a67] dark:text-[#8ba890] mb-1">Chưa nộp</p>
             <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-              {(cls?.studentCount || 0) - submissions.length}
+              {Math.max(0, (classStudents.length || cls?.studentCount || 0) - submissions.length)}
             </p>
           </div>
         </div>
@@ -216,82 +331,105 @@ const GradeSubmissions = () => {
         {/* Submissions List */}
         {loadingSubmissions ? (
           <div className="text-center py-12">
-            <p className="text-[#608a67] dark:text-[#8ba890]">Đang tải bài nộp...</p>
+            <p className="text-[#608a67] dark:text-[#8ba890]">Đang tải dữ liệu...</p>
           </div>
-        ) : submissions.length === 0 ? (
+        ) : displayedList.length === 0 ? (
           <div className="clay-card p-12 text-center">
             <Icon name="pending_actions" className="text-6xl text-gray-400 mx-auto mb-4" />
             <h3 className="text-xl font-bold text-[#111812] dark:text-white mb-2">
-              Chưa có bài nộp
+              Chưa có dữ liệu
             </h3>
             <p className="text-[#608a67] dark:text-[#8ba890]">
-              Chưa có học sinh nào nộp bài
+              {filterStatus === 'submitted'
+                ? 'Chưa có học sinh nào nộp bài'
+                : 'Không có học sinh nào trong danh sách này'}
             </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {submissions.map((submission) => (
+            {displayedList.map((submission) => (
               <div key={submission.id} className="clay-card p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
                     <h3 className="font-bold text-[#111812] dark:text-white mb-1">
                       {studentNameMap[submission.studentUid] || submission.studentName}
                     </h3>
-                    <div className="flex items-center gap-3 text-sm text-[#608a67] dark:text-[#8ba890]">
-                      <span className="flex items-center gap-1">
-                        <Icon name="schedule" className="text-xs" />
-                        {submission.submittedAt ? new Date(submission.submittedAt.seconds * 1000).toLocaleDateString('vi-VN') : 'N/A'}
-                      </span>
-                      {/* Hiển thị số ảnh nếu là bài nhiều ảnh */}
-                      {submission.files && submission.files.length > 1 && (
+
+                    {submission.isNotSubmitted ? (
+                      <div className="flex items-center gap-3 text-sm text-[#608a67] dark:text-[#8ba890]">
+                        <span className="flex items-center gap-1 text-red-500 dark:text-red-400">
+                          <Icon name="cancel" className="text-xs" />
+                          Chưa nộp bài
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3 text-sm text-[#608a67] dark:text-[#8ba890]">
                         <span className="flex items-center gap-1">
-                          <Icon name="image" className="text-xs" />
-                          {submission.files.length} ảnh
+                          <Icon name="schedule" className="text-xs" />
+                          {submission.submittedAt ? new Date(submission.submittedAt.seconds * 1000).toLocaleDateString('vi-VN') : 'N/A'}
                         </span>
-                      )}
-                      {/* Chỉ hiển thị trạng thái cho bài tự luận */}
-                      {exam?.type === 'upload' && (
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-bold ${submission.status === 'graded'
-                            ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-                            : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400'
-                            }`}
-                        >
-                          {submission.status === 'graded' ? 'Đã chấm' : 'Chờ chấm'}
-                        </span>
-                      )}
-                    </div>
+                        {/* Hiển thị số ảnh nếu là bài nhiều ảnh */}
+                        {submission.files && submission.files.length > 1 && (
+                          <span className="flex items-center gap-1">
+                            <Icon name="image" className="text-xs" />
+                            {submission.files.length} ảnh
+                          </span>
+                        )}
+                        {/* Chỉ hiển thị trạng thái cho bài tự luận */}
+                        {exam?.type === 'upload' && (
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-xs font-bold ${submission.status === 'graded'
+                              ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+                              : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400'
+                              }`}
+                          >
+                            {submission.status === 'graded' ? 'Đã chấm' : 'Chờ chấm'}
+                          </span>
+                        )}
+                        {/* Hiển thị trạng thái đã quy đổi */}
+                        {submission.convertedToPoints && (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+                            Đã quy đổi
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-right mr-4">
-                    <p className="text-xl font-bold text-primary">
-                      {exam?.type === 'upload'
-                        ? (submission.totalScore || 0)
-                        : `${submission.totalScore || 0}/${submission.maxScore || 0}`
-                      }
-                    </p>
-                    <p className="text-xs text-[#608a67] dark:text-[#8ba890]">điểm</p>
-                  </div>
-                  {/* Chỉ hiển thị nút Chấm cho bài tự luận */}
-                  {exam?.type === 'upload' && (
-                    <button
-                      onClick={() => {
-                        const uploadSubmissions = submissions.filter(() => true); // all submissions in this view
-                        const currentIndex = uploadSubmissions.findIndex(s => s.id === submission.id);
-                        navigate(`/admin/grade-submissions/${submission.id}`, {
-                          state: {
-                            submissionsList: uploadSubmissions.map(s => s.id),
-                            currentIndex,
-                            assignmentId: selectedAssignment.id,
-                            className: cls?.name,
-                            examTitle: exam?.title,
+
+                  {!submission.isNotSubmitted && (
+                    <>
+                      <div className="text-right mr-4">
+                        <p className="text-xl font-bold text-primary">
+                          {exam?.type === 'upload'
+                            ? (submission.totalScore || 0)
+                            : `${submission.totalScore || 0}/${submission.maxScore || 0}`
                           }
-                        });
-                      }}
-                      className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all"
-                    >
-                      <Icon name="grading" className="inline mr-1" />
-                      Chấm
-                    </button>
+                        </p>
+                        <p className="text-xs text-[#608a67] dark:text-[#8ba890]">điểm</p>
+                      </div>
+                      {/* Chỉ hiển thị nút Chấm cho bài tự luận */}
+                      {exam?.type === 'upload' && (
+                        <button
+                          onClick={() => {
+                            const uploadSubmissions = submissions.filter(() => true); // all submissions in this view
+                            const currentIndex = uploadSubmissions.findIndex(s => s.id === submission.id);
+                            navigate(`/admin/grade-submissions/${submission.id}`, {
+                              state: {
+                                submissionsList: uploadSubmissions.map(s => s.id),
+                                currentIndex,
+                                assignmentId: selectedAssignment.id,
+                                className: cls?.name,
+                                examTitle: exam?.title,
+                              }
+                            });
+                          }}
+                          className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all flex items-center gap-1"
+                        >
+                          <Icon name="grading" className="text-sm" />
+                          Chấm
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

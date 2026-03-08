@@ -10,88 +10,135 @@ import Icon from '../../components/common/Icon';
 const GradeStats = () => {
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
+    const [loadingClass, setLoadingClass] = useState(false);
     const [assignments, setAssignments] = useState([]);
     const [classes, setClasses] = useState({});
     const [exams, setExams] = useState({});
     const [allSubmissions, setAllSubmissions] = useState([]);
+    // Cache: classId -> submissions[], tránh fetch lại
+    const submissionsCache = useState({})[0];
 
     // Filters
-    const [filterClass, setFilterClass] = useState('all');
+    const [filterClass, setFilterClass] = useState('');
     const [filterAssignment, setFilterAssignment] = useState('all');
 
     useEffect(() => {
-        loadData();
+        loadInitialData();
     }, []);
 
-    const loadData = async () => {
+    const loadSubmissionsForClass = async (classId, assignmentsList, classMap, examMap) => {
+        // Return cache nếu đã có
+        if (submissionsCache[classId]) return submissionsCache[classId];
+
+        const uploadForClass = assignmentsList.filter(
+            a => a.classId === classId && examMap[a.examId]?.type === 'upload'
+        );
+
+        const results = [];
+        await Promise.all(
+            uploadForClass.map(async assignment => {
+                const q = query(
+                    collection(db, 'examSubmissions'),
+                    where('assignmentId', '==', assignment.id)
+                );
+                const snapshot = await getDocs(q);
+                const latestByStudent = {};
+                snapshot.docs.forEach(docSnap => {
+                    const data = { id: docSnap.id, ...docSnap.data() };
+                    const uid = data.studentUid;
+                    const time = data.submittedAt?.seconds || 0;
+                    if (!latestByStudent[uid] || time > (latestByStudent[uid].submittedAt?.seconds || 0)) {
+                        latestByStudent[uid] = data;
+                    }
+                });
+                Object.values(latestByStudent).forEach(sub => {
+                    results.push({
+                        ...sub,
+                        assignmentId: assignment.id,
+                        classId: assignment.classId,
+                        className: classMap[assignment.classId]?.name || 'N/A',
+                        examId: assignment.examId,
+                        deadline: assignment.deadline,
+                    });
+                });
+            })
+        );
+
+        submissionsCache[classId] = results;
+        return results;
+    };
+
+    const loadInitialData = async () => {
         setLoading(true);
 
-        // Load classes
-        const classesResult = await getAllClasses();
+        // Load classes + assignments song song
+        const [classesResult, assignmentsResult] = await Promise.all([
+            getAllClasses(),
+            getAllAssignments(),
+        ]);
+
         const classMap = {};
         if (classesResult.success) {
             classesResult.classes.forEach(cls => { classMap[cls.id] = cls; });
             setClasses(classMap);
         }
 
-        // Load assignments (only upload type = tự luận)
-        const assignmentsResult = await getAllAssignments();
-        let uploadAssignments = [];
+        let allAssignmentsList = [];
         if (assignmentsResult.success) {
-            // Load exam details for each assignment
+            allAssignmentsList = assignmentsResult.assignments;
+
+            // Load tất cả exam details song song (dedupe)
+            const uniqueExamIds = [...new Set(allAssignmentsList.map(a => a.examId))];
+            const examResults = await Promise.all(uniqueExamIds.map(id => getExamById(id)));
             const examMap = {};
-            for (const assignment of assignmentsResult.assignments) {
-                const examResult = await getExamById(assignment.examId);
-                if (examResult.success) {
-                    examMap[assignment.examId] = examResult.exam;
+            uniqueExamIds.forEach((examId, i) => {
+                const res = examResults[i];
+                if (res.success) {
+                    examMap[examId] = res.exam;
                 } else {
-                    examMap[assignment.examId] = {
-                        title: assignment.examTitle || 'Đề thi đã xóa',
-                        type: assignment.examType || 'upload',
+                    const fallback = allAssignmentsList.find(a => a.examId === examId);
+                    examMap[examId] = {
+                        title: fallback?.examTitle || 'Đề thi đã xóa',
+                        type: fallback?.examType || 'upload',
                         deleted: true,
                     };
                 }
-            }
+            });
             setExams(examMap);
-            uploadAssignments = assignmentsResult.assignments.filter(a => {
-                const exam = examMap[a.examId];
-                return exam?.type === 'upload';
-            });
-            setAssignments(assignmentsResult.assignments);
+            setAssignments(allAssignmentsList);
+
+            // Lấy lớp đầu tiên có bài tự luận làm default filter
+            const uploadAssignments = allAssignmentsList.filter(a => examMap[a.examId]?.type === 'upload');
+            const firstClassId = uploadAssignments.length > 0 ? uploadAssignments[0].classId : '';
+
+            if (firstClassId) {
+                setFilterClass(firstClassId);
+                // Load submissions của lớp đầu tiên
+                const subs = await loadSubmissionsForClass(firstClassId, allAssignmentsList, classMap, examMap);
+                setAllSubmissions(subs);
+            }
         }
 
-        // Load all submissions for upload-type assignments
-        const submissions = [];
-        for (const assignment of uploadAssignments) {
-            const q = query(
-                collection(db, 'examSubmissions'),
-                where('assignmentId', '==', assignment.id)
-            );
-            const snapshot = await getDocs(q);
-
-            // Lấy bài mới nhất của mỗi HS
-            const latestByStudent = {};
-            snapshot.docs.forEach(doc => {
-                const data = { id: doc.id, ...doc.data() };
-                const uid = data.studentUid;
-                const time = data.submittedAt?.seconds || 0;
-                if (!latestByStudent[uid] || time > (latestByStudent[uid].submittedAt?.seconds || 0)) {
-                    latestByStudent[uid] = data;
-                }
-            });
-            Object.values(latestByStudent).forEach(sub => {
-                submissions.push({
-                    ...sub,
-                    assignmentId: assignment.id,
-                    classId: assignment.classId,
-                    className: classMap[assignment.classId]?.name || 'N/A',
-                    examId: assignment.examId,
-                    deadline: assignment.deadline,
-                });
-            });
-        }
-        setAllSubmissions(submissions);
         setLoading(false);
+    };
+
+    // Khi đổi filter lớp → load on-demand
+    const handleFilterClassChange = async (newClassId) => {
+        setFilterClass(newClassId);
+        setFilterAssignment('all');
+
+        if (!newClassId) return;
+
+        // Kiểm tra cache
+        if (submissionsCache[newClassId]) {
+            setAllSubmissions(submissionsCache[newClassId]);
+            return;
+        }
+
+        setLoadingClass(true);
+        const subs = await loadSubmissionsForClass(newClassId, assignments, classes, exams);
+        setAllSubmissions(subs);
+        setLoadingClass(false);
     };
 
     // --- Derived filtered data ---
@@ -100,16 +147,15 @@ const GradeStats = () => {
         return exam?.type === 'upload';
     });
 
+    // allSubmissions chỉ chứa data của lớp đang chọn → lọc thêm theo bài giao nếu cần
     const filteredSubmissions = allSubmissions.filter(sub => {
-        const matchClass = filterClass === 'all' || sub.classId === filterClass;
-        const matchAssignment = filterAssignment === 'all' || sub.assignmentId === filterAssignment;
-        return matchClass && matchAssignment;
+        return filterAssignment === 'all' || sub.assignmentId === filterAssignment;
     });
 
-    // Assignments visible in filter (respects class filter)
-    const visibleAssignments = filterClass === 'all'
-        ? uploadAssignments
-        : uploadAssignments.filter(a => a.classId === filterClass);
+    // Assignments visible in filter — chỉ show bài của lớp đang chọn
+    const visibleAssignments = filterClass
+        ? uploadAssignments.filter(a => a.classId === filterClass)
+        : uploadAssignments;
 
     // Stats calculation
     const gradedSubs = filteredSubmissions.filter(s => s.status === 'graded');
@@ -156,6 +202,8 @@ const GradeStats = () => {
                 </div>
             </div>
 
+
+
             {/* Filters */}
             <div className="clay-card p-4">
                 <div className="flex flex-wrap gap-4 items-end">
@@ -166,14 +214,19 @@ const GradeStats = () => {
                         </label>
                         <select
                             value={filterClass}
-                            onChange={e => { setFilterClass(e.target.value); setFilterAssignment('all'); }}
+                            onChange={e => handleFilterClassChange(e.target.value)}
                             className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-[#111812] dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
                         >
-                            <option value="all">Tất cả lớp</option>
                             {Object.values(classes).map(cls => (
                                 <option key={cls.id} value={cls.id}>{cls.name}</option>
                             ))}
                         </select>
+                        {loadingClass && (
+                            <div className="flex items-center gap-1.5 mt-1.5 text-xs text-blue-500 dark:text-blue-400">
+                                <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                Đang tải dữ liệu lớp...
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex-1 min-w-[220px]">
@@ -286,8 +339,8 @@ const GradeStats = () => {
                                             <td className="px-4 py-3 text-center">
                                                 <span
                                                     className={`px-2 py-0.5 rounded-full text-xs font-bold ${sub.status === 'graded'
-                                                            ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-                                                            : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400'
+                                                        ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+                                                        : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400'
                                                         }`}
                                                 >
                                                     {sub.status === 'graded' ? 'Đã chấm' : 'Chờ chấm'}
@@ -296,8 +349,8 @@ const GradeStats = () => {
                                             <td className="px-4 py-3 text-center">
                                                 <span
                                                     className={`text-lg font-bold ${sub.status === 'graded'
-                                                            ? 'text-primary'
-                                                            : 'text-gray-400 dark:text-gray-600'
+                                                        ? 'text-primary'
+                                                        : 'text-gray-400 dark:text-gray-600'
                                                         }`}
                                                 >
                                                     {sub.status === 'graded' ? sub.totalScore ?? '-' : '–'}
