@@ -89,7 +89,11 @@ const GradeSubmissions = () => {
   const getSubmissionCount = async (assignmentId) => {
     try {
       const submissionsRef = collection(db, 'examSubmissions');
-      const q = query(submissionsRef, where('assignmentId', '==', assignmentId));
+      const q = query(
+        submissionsRef,
+        where('assignmentId', '==', assignmentId),
+        where('status', '!=', 'in_progress')
+      );
       const snapshot = await getDocs(q);
       const uniqueStudents = new Set();
       snapshot.docs.forEach(doc => {
@@ -120,7 +124,11 @@ const GradeSubmissions = () => {
 
     try {
       const submissionsRef = collection(db, 'examSubmissions');
-      const q = query(submissionsRef, where('assignmentId', '==', assignment.id));
+      const q = query(
+        submissionsRef,
+        where('assignmentId', '==', assignment.id),
+        where('status', '!=', 'in_progress')
+      );
       const snapshot = await getDocs(q);
 
       const allSubmissions = snapshot.docs.map(doc => ({

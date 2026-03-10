@@ -42,10 +42,22 @@ const PDFAnnotator = ({ pdfUrl, fileUrls, fileType, onSaveAnnotation, onClose, e
   const hasMultipleImages = fileUrls && fileUrls.length > 1;
   const effectiveTotalPages = hasMultipleImages ? fileUrls.length : totalPages;
 
-  // Load PDF or Image
+  // Load PDF or Image setup
   useEffect(() => {
     loadFile();
-  }, [pdfUrl, currentPage]);
+  }, [pdfUrl]);
+
+  // Handle page changes
+  useEffect(() => {
+    // Reset base scale when loading new page so it recalculates scaling
+    baseScaleSetRef.current = false;
+
+    if (hasMultipleImages && fileUrls) {
+      setCurrentImageUrl(fileUrls[currentPage - 1]);
+    } else if (fileType === 'image' || (pdfUrl && pdfUrl.match(/\\.(jpg|jpeg|png|gif|webp)$/i))) {
+      setCurrentImageUrl(pdfUrl);
+    }
+  }, [currentPage, hasMultipleImages, fileUrls, pdfUrl, fileType]);
 
   // Render page when currentPage or zoom changes
   useEffect(() => {
@@ -56,26 +68,35 @@ const PDFAnnotator = ({ pdfUrl, fileUrls, fileType, onSaveAnnotation, onClose, e
     }
   }, [pdf, currentPage, isImage, zoom, currentImageUrl]);
 
+  // Clean up PDF to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (pdf) {
+        try {
+          pdf.destroy();
+        } catch (e) {
+          console.error('Error destroying PDF', e);
+        }
+      }
+    };
+  }, [pdf]);
+
   const loadFile = async () => {
     try {
       setLoading(true);
-      // Reset base scale when loading new page
-      baseScaleSetRef.current = false;
 
       // If we have multiple images, use fileUrls array
       if (hasMultipleImages) {
         setIsImage(true);
         setTotalPages(fileUrls.length);
-        setCurrentImageUrl(fileUrls[currentPage - 1]); // Set current image URL based on page
         setLoading(false);
         return;
       }
 
       // Check if file is image
-      if (fileType === 'image' || pdfUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+      if (fileType === 'image' || (pdfUrl && pdfUrl.match(/\\.(jpg|jpeg|png|gif|webp)$/i))) {
         setIsImage(true);
         setTotalPages(1); // Images are single page
-        setCurrentImageUrl(pdfUrl);
         setLoading(false);
         return;
       }
@@ -488,36 +509,32 @@ const PDFAnnotator = ({ pdfUrl, fileUrls, fileType, onSaveAnnotation, onClose, e
             {/* Drawing Tools */}
             <button
               onClick={() => setTool('pen')}
-              className={`w-full py-2.5 px-3 rounded-xl flex items-center gap-2 ${
-                tool === 'pen' ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
-              }`}
+              className={`w-full py-2.5 px-3 rounded-xl flex items-center gap-2 ${tool === 'pen' ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
+                }`}
             >
               <Icon name="edit" />
               <span className="text-sm font-medium">Bút</span>
             </button>
             <button
               onClick={() => setTool('highlight')}
-              className={`w-full py-2.5 px-3 rounded-xl flex items-center gap-2 ${
-                tool === 'highlight' ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
-              }`}
+              className={`w-full py-2.5 px-3 rounded-xl flex items-center gap-2 ${tool === 'highlight' ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
+                }`}
             >
               <Icon name="highlight" />
               <span className="text-sm font-medium">Highlight</span>
             </button>
             <button
               onClick={() => setTool('text')}
-              className={`w-full py-2.5 px-3 rounded-xl flex items-center gap-2 ${
-                tool === 'text' ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
-              }`}
+              className={`w-full py-2.5 px-3 rounded-xl flex items-center gap-2 ${tool === 'text' ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
+                }`}
             >
               <Icon name="text_fields" />
               <span className="text-sm font-medium">Text</span>
             </button>
             <button
               onClick={() => setTool('eraser')}
-              className={`w-full py-2.5 px-3 rounded-xl flex items-center gap-2 ${
-                tool === 'eraser' ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
-              }`}
+              className={`w-full py-2.5 px-3 rounded-xl flex items-center gap-2 ${tool === 'eraser' ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
+                }`}
             >
               <Icon name="delete" />
               <span className="text-sm font-medium">Xóa</span>
@@ -536,27 +553,24 @@ const PDFAnnotator = ({ pdfUrl, fileUrls, fileType, onSaveAnnotation, onClose, e
                     <div className="flex items-center justify-center gap-2">
                       <button
                         onClick={() => setPenSize(1)}
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          penSize === 1 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
-                        }`}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${penSize === 1 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
+                          }`}
                         title="Nhỏ"
                       >
                         <div className={`w-1.5 h-1.5 rounded-full ${penSize === 1 ? 'bg-white' : 'bg-gray-600 dark:bg-gray-300'}`}></div>
                       </button>
                       <button
                         onClick={() => setPenSize(2)}
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          penSize === 2 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
-                        }`}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${penSize === 2 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
+                          }`}
                         title="Trung bình"
                       >
                         <div className={`w-2.5 h-2.5 rounded-full ${penSize === 2 ? 'bg-white' : 'bg-gray-600 dark:bg-gray-300'}`}></div>
                       </button>
                       <button
                         onClick={() => setPenSize(3)}
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          penSize === 3 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
-                        }`}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${penSize === 3 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
+                          }`}
                         title="Lớn"
                       >
                         <div className={`w-4 h-4 rounded-full ${penSize === 3 ? 'bg-white' : 'bg-gray-600 dark:bg-gray-300'}`}></div>
@@ -572,27 +586,24 @@ const PDFAnnotator = ({ pdfUrl, fileUrls, fileType, onSaveAnnotation, onClose, e
                     <div className="flex items-center justify-center gap-2">
                       <button
                         onClick={() => setTextSize(1)}
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          textSize === 1 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
-                        }`}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${textSize === 1 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
+                          }`}
                         title="Nhỏ"
                       >
                         <span className={`text-xs font-bold ${textSize === 1 ? 'text-white' : 'text-gray-600 dark:text-gray-300'}`}>A</span>
                       </button>
                       <button
                         onClick={() => setTextSize(2)}
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          textSize === 2 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
-                        }`}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${textSize === 2 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
+                          }`}
                         title="Trung bình"
                       >
                         <span className={`text-sm font-bold ${textSize === 2 ? 'text-white' : 'text-gray-600 dark:text-gray-300'}`}>A</span>
                       </button>
                       <button
                         onClick={() => setTextSize(3)}
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          textSize === 3 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
-                        }`}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center ${textSize === 3 ? 'bg-primary text-white' : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'
+                          }`}
                         title="Lớn"
                       >
                         <span className={`text-lg font-bold ${textSize === 3 ? 'text-white' : 'text-gray-600 dark:text-gray-300'}`}>A</span>
@@ -613,9 +624,8 @@ const PDFAnnotator = ({ pdfUrl, fileUrls, fileType, onSaveAnnotation, onClose, e
                 <button
                   key={c}
                   onClick={() => setColor(c)}
-                  className={`w-6 h-6 rounded-full border-2 ${
-                    color === c ? 'border-gray-900 dark:border-white' : 'border-transparent'
-                  }`}
+                  className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-gray-900 dark:border-white' : 'border-transparent'
+                    }`}
                   style={{ backgroundColor: c }}
                   title={`Màu ${c}`}
                 />
@@ -656,25 +666,25 @@ const PDFAnnotator = ({ pdfUrl, fileUrls, fileType, onSaveAnnotation, onClose, e
 
           {/* Canvas Area */}
           <div className="flex-1 overflow-auto p-4 bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
-          {loading ? (
-            <div className="flex items-center justify-center">
-              <p className="text-gray-600 dark:text-gray-400">Đang tải...</p>
-            </div>
-          ) : (
-            <div className="relative" style={{ display: 'inline-block' }}>
-              <canvas ref={canvasRef} className="block" />
-              <canvas
-                ref={drawingCanvasRef}
-                className="absolute top-0 left-0 cursor-crosshair"
-                style={{ touchAction: 'none' }}
-                onPointerDown={startDrawing}
-                onPointerMove={draw}
-                onPointerUp={stopDrawing}
-                onPointerLeave={stopDrawing}
-                onPointerCancel={stopDrawing}
-              />
-            </div>
-          )}
+            {loading ? (
+              <div className="flex items-center justify-center">
+                <p className="text-gray-600 dark:text-gray-400">Đang tải...</p>
+              </div>
+            ) : (
+              <div className="relative" style={{ display: 'inline-block' }}>
+                <canvas ref={canvasRef} className="block" />
+                <canvas
+                  ref={drawingCanvasRef}
+                  className="absolute top-0 left-0 cursor-crosshair"
+                  style={{ touchAction: 'none' }}
+                  onPointerDown={startDrawing}
+                  onPointerMove={draw}
+                  onPointerUp={stopDrawing}
+                  onPointerLeave={stopDrawing}
+                  onPointerCancel={stopDrawing}
+                />
+              </div>
+            )}
           </div>
         </div>
 

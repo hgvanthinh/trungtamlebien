@@ -56,7 +56,7 @@ const Exams = () => {
   };
 
   const hasSubmittedAssignment = (assignmentId) => {
-    return submissions.some((s) => s.assignmentId === assignmentId);
+    return submissions.some((s) => s.assignmentId === assignmentId && s.status !== 'in_progress');
   };
 
   // Lấy submission MỚI NHẤT cho assignment (điểm tính theo lần làm cuối)

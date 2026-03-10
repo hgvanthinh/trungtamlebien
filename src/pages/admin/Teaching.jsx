@@ -57,6 +57,20 @@ const Teaching = () => {
   // Ripple Effect State
   const [ripples, setRipples] = useState([]);
 
+  // Zoom avatar state
+  const [zoomedAvatarId, setZoomedAvatarId] = useState(null);
+
+  // Close zoomed avatar when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (zoomedAvatarId && !event.target.closest('.avatar-zoom-container')) {
+        setZoomedAvatarId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [zoomedAvatarId]);
+
   useEffect(() => {
     fetchClasses();
   }, []);
@@ -793,7 +807,11 @@ const Teaching = () => {
                       {index + 1}.
                     </span>
                     {/* Avatar nhỏ */}
-                    <div className="w-15 h-15 flex-shrink-0">
+                    <div
+                      className={`w-15 h-15 flex-shrink-0 cursor-pointer avatar-zoom-container transition-transform duration-300 ${zoomedAvatarId === student.uid ? 'scale-[3] z-[100] relative' : 'relative z-10'}`}
+                      onClick={() => setZoomedAvatarId(prev => prev === student.uid ? null : student.uid)}
+                      onMouseLeave={() => { if (zoomedAvatarId === student.uid) setZoomedAvatarId(null); }}
+                    >
                       <Avatar
                         src={student.avatar}
                         name={student.fullName}
@@ -864,7 +882,11 @@ const Teaching = () => {
                       </div>
 
                       {/* Avatar */}
-                      <div className="flex-shrink-0">
+                      <div
+                        className={`flex-shrink-0 cursor-pointer avatar-zoom-container transition-transform duration-300 ${zoomedAvatarId === student.uid ? 'scale-[3] z-[100] relative origin-center' : 'relative z-10'}`}
+                        onClick={() => setZoomedAvatarId(prev => prev === student.uid ? null : student.uid)}
+                        onMouseLeave={() => { if (zoomedAvatarId === student.uid) setZoomedAvatarId(null); }}
+                      >
                         <Avatar
                           src={student.avatar}
                           name={student.fullName}

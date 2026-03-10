@@ -29,7 +29,7 @@ const VideoModal = ({ video, onClose, onSave }) => {
         // Extract YouTube ID
         const youtubeId = extractYouTubeId(formData.youtubeUrl);
         if (!youtubeId) {
-            setError('Link YouTube không hợp lệ. Vui lòng nhập link dạng: https://www.youtube.com/watch?v=...');
+            setError('Link YouTube không hợp lệ. Vui lòng nhập link dạng: youtube.com/watch?v=... hoặc youtube.com/shorts/...');
             return;
         }
 
@@ -72,12 +72,14 @@ const VideoModal = ({ video, onClose, onSave }) => {
                             type="text"
                             value={formData.youtubeUrl}
                             onChange={(e) => setFormData({ ...formData, youtubeUrl: e.target.value })}
-                            placeholder="https://www.youtube.com/watch?v=..."
+                            placeholder="https://www.youtube.com/watch?v=... hoặc https://www.youtube.com/shorts/..."
                             className="clay-input w-full px-4 py-3 rounded-xl"
                             disabled={isLoading}
                         />
-                        <p className="text-xs text-[#608a67] dark:text-[#8ba890] mt-1">
-                            Ví dụ: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+                        <p className="text-xs text-[#608a67] dark:text-[#8ba890] mt-1 space-y-1 block">
+                            <span>Ví dụ: https://www.youtube.com/watch?v=dQw4w9WgXcQ</span>
+                            <br />
+                            <span>Hoặc: https://www.youtube.com/shorts/_jpwfqAZH_I</span>
                         </p>
                     </div>
 

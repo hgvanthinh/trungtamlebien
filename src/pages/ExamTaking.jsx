@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -18,6 +20,51 @@ import MathInput from '../components/exam/MathInput';
 import MathDisplay from '../components/exam/MathDisplay';
 import StudentSubmissionUpload from '../components/exam/StudentSubmissionUpload';
 
+const PdfViewerWrapper = ({ url, title, layout = 'auto' }) => {
+  const gviewUrl = `https://docs.google.com/gview?url=${encodeURIComponent(url)}&embedded=true`;
+
+  const showMobile = layout === 'mobile' || layout === 'auto';
+  const showDesktop = layout === 'desktop' || layout === 'auto';
+
+  return (
+    <div className="relative w-full bg-gray-50 dark:bg-gray-800 flex flex-col rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
+      {/* Mobile Viewer (Google Docs) */}
+      {showMobile && (
+        <iframe
+          src={gviewUrl}
+          className={`w-full border-0 ${layout === 'auto' ? 'block lg:hidden h-[60vh] sm:h-[70vh]' : 'h-[60vh] sm:h-[70vh]'}`}
+          title={`${title} - Mobile`}
+        />
+      )}
+
+      {/* Desktop Viewer (Native) */}
+      {showDesktop && (
+        <iframe
+          src={url}
+          className={`w-full border-0 ${layout === 'auto' ? 'hidden lg:block h-[80vh]' : 'h-[80vh]'}`}
+          title={title}
+        />
+      )}
+
+      {/* Fallback open button below viewer */}
+      <div className="p-3 bg-gray-100 dark:bg-gray-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-gray-200 dark:border-gray-700">
+        <span className="text-xs text-gray-500 font-medium text-center sm:text-left">
+          Nếu màn hình trắng hoặc đề thi bị lỗi:
+        </span>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-xl font-medium text-sm transition-colors hover:bg-blue-600 shadow-sm whitespace-nowrap"
+        >
+          <Icon name="open_in_new" className="text-sm" />
+          Mở Đề Thi Trực Tiếp
+        </a>
+      </div>
+    </div>
+  );
+};
+
 const ExamTaking = () => {
   const { examId } = useParams();
   const navigate = useNavigate();
@@ -35,6 +82,7 @@ const ExamTaking = () => {
   const [submitting, setSubmitting] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [toast, setToast] = useState(null);
+  const [isSubmitted, setIsSubmitted] = useState(false); // Track if submission is intentional
   const [mcAnswers, setMcAnswers] = useState({}); // Đáp án trắc nghiệm mới
 
   // Mixed exam answers
@@ -49,12 +97,23 @@ const ExamTaking = () => {
 
   useEffect(() => {
     loadExam();
+
+    // Prevent accidental exit - Browser level
+    const handleBeforeUnload = (e) => {
+      if (!isSubmitted) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
     };
-  }, [examId]);
+  }, [examId, isSubmitted]);
 
   const loadExam = async () => {
     setLoading(true);
@@ -103,9 +162,17 @@ const ExamTaking = () => {
 
     setSubmissionId(submissionResult.submissionId);
 
+    // If resumed, restore answers
+    if (submissionResult.answers) {
+      setAnswers(submissionResult.answers);
+    }
+
     // Start timer
-    setTimeLeft(examData.duration * 60); // Convert to seconds
-    startTimeRef.current = Date.now();
+    const totalTime = examData.duration * 60;
+    const usedTime = submissionResult.duration || 0;
+    setTimeLeft(Math.max(0, totalTime - usedTime));
+
+    startTimeRef.current = Date.now() - (usedTime * 1000);
 
     timerRef.current = setInterval(() => {
       setTimeLeft((prev) => {
@@ -113,6 +180,15 @@ const ExamTaking = () => {
           handleSubmit();
           return 0;
         }
+
+        // Cập nhật duration trong Firestore sau mỗi 30s để resume chính xác
+        const currentSeconds = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        if (currentSeconds % 30 === 0 && submissionResult.submissionId) {
+          updateDoc(doc(db, 'examSubmissions', submissionResult.submissionId), {
+            duration: currentSeconds
+          });
+        }
+
         return prev - 1;
       });
     }, 1000);
@@ -135,6 +211,7 @@ const ExamTaking = () => {
 
     if (!confirm('Bạn có chắc muốn nộp bài?')) return;
 
+    setIsSubmitted(true);
     setSubmitting(true);
 
     const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
@@ -172,6 +249,7 @@ const ExamTaking = () => {
   // Handle upload submission complete
   const handleUploadComplete = async (fileData) => {
     try {
+      setIsSubmitted(true);
       const result = await submitUploadExam(
         examId,
         currentUser.uid,
@@ -224,6 +302,7 @@ const ExamTaking = () => {
       }
     }
 
+    setIsSubmitted(true);
     setSubmitting(true);
 
     const result = await submitMultipleChoiceExam(
@@ -302,39 +381,7 @@ const ExamTaking = () => {
               <h2 className="font-semibold text-sm">Đề thi</h2>
             </div>
             {exam.fileType === 'pdf' ? (
-              <div className="space-y-3">
-                <div className="relative w-full bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden">
-                  <object
-                    data={exam.fileUrl}
-                    type="application/pdf"
-                    className="w-full h-[50vh]"
-                    aria-label="PDF Viewer"
-                  >
-                    <div className="p-6 text-center">
-                      <Icon name="picture_as_pdf" className="text-6xl text-red-500 mb-4" />
-                      <p className="text-sm font-medium mb-3">Trình duyệt không hỗ trợ xem PDF trực tiếp</p>
-                      <a
-                        href={exam.fileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl font-medium"
-                      >
-                        <Icon name="open_in_new" />
-                        Mở PDF trong tab mới
-                      </a>
-                    </div>
-                  </object>
-                </div>
-                <a
-                  href={exam.fileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-xl text-sm font-medium"
-                >
-                  <Icon name="fullscreen" />
-                  Mở toàn màn hình
-                </a>
-              </div>
+              <PdfViewerWrapper url={exam.fileUrl} title={exam.title} layout="mobile" />
             ) : (
               <img src={exam.fileUrl} alt={exam.title} className="w-full rounded-xl" />
             )}
@@ -356,8 +403,8 @@ const ExamTaking = () => {
                         key={option}
                         onClick={() => handleMcAnswerChange(num, option)}
                         className={`flex-1 py-1.5 text-sm font-medium rounded transition-all ${mcAnswers[num] === option
-                            ? 'bg-primary text-white'
-                            : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 border border-gray-200 dark:border-gray-600'
+                          ? 'bg-primary text-white'
+                          : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 border border-gray-200 dark:border-gray-600'
                           }`}
                       >
                         {option}
@@ -394,11 +441,7 @@ const ExamTaking = () => {
                 <h2 className="font-semibold">Đề thi</h2>
               </div>
               {exam.fileType === 'pdf' ? (
-                <iframe
-                  src={exam.fileUrl}
-                  className="w-full h-[80vh] rounded-xl"
-                  title={exam.title}
-                />
+                <PdfViewerWrapper url={exam.fileUrl} title={exam.title} layout="desktop" />
               ) : (
                 <img src={exam.fileUrl} alt={exam.title} className="w-full rounded-xl" />
               )}
@@ -437,8 +480,8 @@ const ExamTaking = () => {
                           key={option}
                           onClick={() => handleMcAnswerChange(num, option)}
                           className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${mcAnswers[num] === option
-                              ? 'bg-primary text-white shadow-md'
-                              : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 border border-gray-200 dark:border-gray-600'
+                            ? 'bg-primary text-white shadow-md'
+                            : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 border border-gray-200 dark:border-gray-600'
                             }`}
                         >
                           {option}
@@ -522,6 +565,9 @@ const ExamTaking = () => {
     };
 
     const handleMixedSubmit = async () => {
+      if (!confirm('Bạn có chắc muốn nộp bài?')) return;
+
+      setIsSubmitted(true);
       setSubmitting(true);
 
       const result = await submitMixedExam(examId, mixedAnswers, {
@@ -583,11 +629,7 @@ const ExamTaking = () => {
                 <h2 className="font-semibold">Đề thi</h2>
               </div>
               {exam.fileType === 'pdf' ? (
-                <iframe
-                  src={exam.fileUrl}
-                  className="w-full h-[80vh] rounded-xl"
-                  title={exam.title}
-                />
+                <PdfViewerWrapper url={exam.fileUrl} title={exam.title} layout="auto" />
               ) : (
                 <img src={exam.fileUrl} alt={exam.title} className="w-full rounded-xl" />
               )}
@@ -633,8 +675,8 @@ const ExamTaking = () => {
                               key={option}
                               onClick={() => handleMixedAbcdChange(num, option)}
                               className={`flex-1 py-1.5 text-xs font-medium rounded transition-all ${mixedAnswers.abcd[num] === option
-                                  ? 'bg-blue-500 text-white shadow-md'
-                                  : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 border border-gray-200 dark:border-gray-600'
+                                ? 'bg-blue-500 text-white shadow-md'
+                                : 'bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 border border-gray-200 dark:border-gray-600'
                                 }`}
                             >
                               {option}
@@ -664,8 +706,8 @@ const ExamTaking = () => {
                                 key={subItem}
                                 onClick={() => handleMixedTrueFalseChange(num, subItem, !isTrue)}
                                 className={`py-1.5 text-xs font-medium rounded transition-all ${isTrue
-                                    ? 'bg-green-500 text-white'
-                                    : 'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600'
+                                  ? 'bg-green-500 text-white'
+                                  : 'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600'
                                   }`}
                               >
                                 {subItem.toUpperCase()}
@@ -769,43 +811,7 @@ const ExamTaking = () => {
               <h2 className="font-semibold text-sm">Đề thi</h2>
             </div>
             {exam.fileType === 'pdf' ? (
-              <div className="space-y-3">
-                {/* PDF Viewer - Using object tag for better mobile support */}
-                <div className="relative w-full bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden">
-                  <object
-                    data={exam.fileUrl}
-                    type="application/pdf"
-                    className="w-full h-[70vh]"
-                    aria-label="PDF Viewer"
-                  >
-                    {/* Fallback for browsers that don't support PDF viewing */}
-                    <div className="p-6 text-center">
-                      <Icon name="picture_as_pdf" className="text-6xl text-red-500 mb-4" />
-                      <p className="text-sm font-medium mb-3">Trình duyệt không hỗ trợ xem PDF trực tiếp</p>
-                      <a
-                        href={exam.fileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition"
-                      >
-                        <Icon name="open_in_new" />
-                        Mở PDF trong tab mới
-                      </a>
-                    </div>
-                  </object>
-                </div>
-
-                {/* Quick Link - Always show for convenience */}
-                <a
-                  href={exam.fileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-xl text-sm font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition"
-                >
-                  <Icon name="fullscreen" />
-                  Mở toàn màn hình
-                </a>
-              </div>
+              <PdfViewerWrapper url={exam.fileUrl} title={exam.title} layout="mobile" />
             ) : (
               <img src={exam.fileUrl} alt={exam.title} className="w-full rounded-xl" />
             )}
@@ -846,11 +852,7 @@ const ExamTaking = () => {
                 <h2 className="font-semibold">Đề thi</h2>
               </div>
               {exam.fileType === 'pdf' ? (
-                <iframe
-                  src={exam.fileUrl}
-                  className="w-full h-[80vh] rounded-xl"
-                  title={exam.title}
-                />
+                <PdfViewerWrapper url={exam.fileUrl} title={exam.title} layout="desktop" />
               ) : (
                 <img src={exam.fileUrl} alt={exam.title} className="w-full rounded-xl" />
               )}

@@ -34,6 +34,8 @@ const GradeSubmissionDetail = () => {
       setLoading(true);
       setScore('');
       setFeedback('');
+      setCurrentImageIndex(0);
+      setShowAnnotator(false);
 
       // Load submission
       const submissionRef = doc(db, 'examSubmissions', submissionId);
@@ -302,7 +304,9 @@ const GradeSubmissionDetail = () => {
                   {(() => {
                     const pageNum = currentImageIndex + 1;
                     const annotation = submission.annotations?.find(a => a.page === pageNum);
-                    const displayUrl = annotation ? annotation.imageUrl : sortedFiles[currentImageIndex].fileUrl;
+                    const file = sortedFiles[currentImageIndex];
+                    if (!file) return null;
+                    const displayUrl = annotation ? annotation.imageUrl : file.fileUrl;
                     const isAnnotated = !!annotation;
                     return (
                       <div className={`bg-white dark:bg-gray-900 rounded-lg p-3 border-2 ${isAnnotated ? 'border-blue-400 dark:border-blue-500' : 'border-gray-200 dark:border-gray-700'
@@ -310,7 +314,7 @@ const GradeSubmissionDetail = () => {
                         <div className="flex items-center gap-2 mb-2">
                           <Icon name={isAnnotated ? 'draw' : 'image'} className={`text-sm ${isAnnotated ? 'text-blue-500' : 'text-primary'}`} />
                           <p className="text-xs font-medium text-[#608a67] dark:text-[#8ba890]">
-                            {isAnnotated ? 'Bài đã ghi chú (trang ' + pageNum + ')' : sortedFiles[currentImageIndex].fileName}
+                            {isAnnotated ? 'Bài đã ghi chú (trang ' + pageNum + ')' : file.fileName}
                           </p>
                         </div>
                         <img

@@ -472,23 +472,74 @@ export const submitUploadExam = async (examId, studentUid, studentName, classId,
 };
 
 /**
+ * Lấy submission đang làm (in_progress) của học sinh
+ */
+export const getInProgressSubmission = async (examId, studentUid, assignmentId = null) => {
+  try {
+    const submissionsRef = collection(db, 'examSubmissions');
+    let q;
+    if (assignmentId) {
+      q = query(
+        submissionsRef,
+        where('assignmentId', '==', assignmentId),
+        where('studentUid', '==', studentUid),
+        where('status', '==', 'in_progress'),
+        limit(1)
+      );
+    } else {
+      q = query(
+        submissionsRef,
+        where('examId', '==', examId),
+        where('studentUid', '==', studentUid),
+        where('status', '==', 'in_progress'),
+        limit(1)
+      );
+    }
+
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+
+    const doc = snapshot.docs[0];
+    return { id: doc.id, ...doc.data() };
+  } catch (error) {
+    console.error('Error getting in_progress submission:', error);
+    return null;
+  }
+};
+
+/**
  * Tạo submission mới khi học sinh bắt đầu làm bài (cho đề manual)
+ * CẬP NHẬT: Kiểm tra nếu đã có bản ghi in_progress thì trả về luôn để tiếp tục làm bài
  */
 export const createSubmission = async (examId, studentUid, studentName, classId, assignmentId = null) => {
   try {
+    // 1. Kiểm tra xem có bản ghi đang làm dở (in_progress) không
+    const inProgress = await getInProgressSubmission(examId, studentUid, assignmentId);
+    if (inProgress) {
+      return {
+        success: true,
+        submissionId: inProgress.id,
+        answers: inProgress.answers || {},
+        duration: inProgress.duration || 0,
+        isResumed: true
+      };
+    }
+
     const submissionsRef = collection(db, 'examSubmissions');
 
-    // Chỉ check duplicate nếu KHÔNG có assignmentId (cho phép làm lại bài được giao)
+    // Chỉ check duplicate (đã nộp) nếu KHÔNG có assignmentId (cho phép làm lại bài được giao)
+    // Nếu là assignment, ta cho phép tạo attempt mới nếu không có attempt nào đang in_progress
     if (!assignmentId) {
       const q = query(
         submissionsRef,
         where('examId', '==', examId),
-        where('studentUid', '==', studentUid)
+        where('studentUid', '==', studentUid),
+        where('status', '!=', 'in_progress') // Đã nộp hoặc đã chấm
       );
       const existingSnapshot = await getDocs(q);
 
       if (!existingSnapshot.empty) {
-        return { success: false, error: 'Bạn đã làm bài thi này rồi' };
+        return { success: false, error: 'Bạn đã hoàn thành bài thi này rồi' };
       }
     }
 
@@ -515,7 +566,7 @@ export const createSubmission = async (examId, studentUid, studentName, classId,
 
     const docRef = await addDoc(submissionsRef, submissionData);
 
-    return { success: true, submissionId: docRef.id };
+    return { success: true, submissionId: docRef.id, answers: {}, duration: 0 };
   } catch (error) {
     console.error('Error creating submission:', error);
     return { success: false, error: error.message };
