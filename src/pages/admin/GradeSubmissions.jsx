@@ -26,6 +26,7 @@ const GradeSubmissions = () => {
   const [assignmentToDelete, setAssignmentToDelete] = useState(null);
   const [toast, setToast] = useState(null);
   const [isConverting, setIsConverting] = useState(false);
+  const [excludedSubmissions, setExcludedSubmissions] = useState(new Set());
 
   useEffect(() => {
     loadData();
@@ -112,6 +113,7 @@ const GradeSubmissions = () => {
     setSelectedAssignment(assignment);
     setFilterStatus('submitted');
     setLoadingSubmissions(true);
+    setExcludedSubmissions(new Set());
 
     // Load student name map for this class
     const classStudentsResult = await getClassStudents(assignment.classId);
@@ -178,6 +180,18 @@ const GradeSubmissions = () => {
     setShowConfirmDelete(false);
   };
 
+  const toggleExclusion = (submissionId) => {
+    setExcludedSubmissions(prev => {
+      const next = new Set(prev);
+      if (next.has(submissionId)) {
+        next.delete(submissionId);
+      } else {
+        next.add(submissionId);
+      }
+      return next;
+    });
+  };
+
   const handleConvertToPoints = async () => {
     if (!submissions || submissions.length === 0) {
       setToast({ type: 'warning', message: 'Không có bài nộp nào để quy đổi' });
@@ -187,6 +201,7 @@ const GradeSubmissions = () => {
     const examType = exams[selectedAssignment?.examId]?.type;
     const unconvertedSubmissions = submissions.filter(s => {
       if (s.convertedToPoints) return false;
+      if (excludedSubmissions.has(s.id)) return false;
       const score = examType === 'upload' ? (s.totalScore || 0) : ((s.totalScore / (s.maxScore || 1)) * 10);
       return score > 0;
     });
@@ -294,18 +309,24 @@ const GradeSubmissions = () => {
               Lớp: {cls?.name} • Hạn: {selectedAssignment.deadline?.toDate().toLocaleDateString('vi-VN')}
             </p>
           </div>
-          <button
-            onClick={handleConvertToPoints}
-            disabled={isConverting}
-            className="px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 rounded-xl font-bold hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isConverting ? (
-              <div className="w-5 h-5 border-2 border-yellow-600 dark:border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
-            ) : (
-              <Icon name="generating_tokens" />
-            )}
-            Quy đổi sang điểm tích lũy
-          </button>
+          {submissions.length > 0 && (
+            <button
+              onClick={handleConvertToPoints}
+              disabled={isConverting}
+              className="px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 rounded-xl font-bold hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isConverting ? (
+                <div className="w-5 h-5 border-2 border-yellow-600 dark:border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+              ) : (
+                <Icon name="generating_tokens" />
+              )}
+              Quy đổi ({submissions.filter(s => {
+                if (s.convertedToPoints || excludedSubmissions.has(s.id)) return false;
+                const score = exams[selectedAssignment?.examId]?.type === 'upload' ? (s.totalScore || 0) : ((s.totalScore / (s.maxScore || 1)) * 10);
+                return score > 0;
+              }).length}) sang điểm tích lũy
+            </button>
+          )}
         </div>
 
         {/* Stats */}
@@ -402,6 +423,20 @@ const GradeSubmissions = () => {
                           <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
                             Đã quy đổi
                           </span>
+                        )}
+                        {/* Tùy chọn không quy đổi */}
+                        {!submission.convertedToPoints && (
+                          <button
+                            onClick={() => toggleExclusion(submission.id)}
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold transition-colors ${
+                              excludedSubmissions.has(submission.id)
+                                ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            <Icon name={excludedSubmissions.has(submission.id) ? 'check_box' : 'check_box_outline_blank'} className="text-[10px]" />
+                            Không quy đổi
+                          </button>
                         )}
                       </div>
                     )}
