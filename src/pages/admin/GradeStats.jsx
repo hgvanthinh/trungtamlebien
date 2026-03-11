@@ -45,6 +45,7 @@ const GradeStats = () => {
                 const latestByStudent = {};
                 snapshot.docs.forEach(docSnap => {
                     const data = { id: docSnap.id, ...docSnap.data() };
+                    if (data.status === 'in_progress') return;
                     const uid = data.studentUid;
                     const time = data.submittedAt?.seconds || 0;
                     if (!latestByStudent[uid] || time > (latestByStudent[uid].submittedAt?.seconds || 0)) {

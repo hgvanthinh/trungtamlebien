@@ -91,13 +91,15 @@ const GradeSubmissions = () => {
       const submissionsRef = collection(db, 'examSubmissions');
       const q = query(
         submissionsRef,
-        where('assignmentId', '==', assignmentId),
-        where('status', '!=', 'in_progress')
+        where('assignmentId', '==', assignmentId)
       );
       const snapshot = await getDocs(q);
       const uniqueStudents = new Set();
       snapshot.docs.forEach(doc => {
-        uniqueStudents.add(doc.data().studentUid);
+        const data = doc.data();
+        if (data.status !== 'in_progress') {
+          uniqueStudents.add(data.studentUid);
+        }
       });
       return uniqueStudents.size;
     } catch (error) {
@@ -126,15 +128,16 @@ const GradeSubmissions = () => {
       const submissionsRef = collection(db, 'examSubmissions');
       const q = query(
         submissionsRef,
-        where('assignmentId', '==', assignment.id),
-        where('status', '!=', 'in_progress')
+        where('assignmentId', '==', assignment.id)
       );
       const snapshot = await getDocs(q);
 
-      const allSubmissions = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const allSubmissions = snapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }))
+        .filter(sub => sub.status !== 'in_progress');
 
       // Lọc chỉ lấy bài nộp mới nhất của mỗi học sinh
       const latestByStudent = {};

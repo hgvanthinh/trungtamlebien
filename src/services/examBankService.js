@@ -533,12 +533,13 @@ export const createSubmission = async (examId, studentUid, studentName, classId,
       const q = query(
         submissionsRef,
         where('examId', '==', examId),
-        where('studentUid', '==', studentUid),
-        where('status', '!=', 'in_progress') // Đã nộp hoặc đã chấm
+        where('studentUid', '==', studentUid)
       );
       const existingSnapshot = await getDocs(q);
 
-      if (!existingSnapshot.empty) {
+      const hasCompleted = existingSnapshot.docs.some(doc => doc.data().status !== 'in_progress');
+
+      if (hasCompleted) {
         return { success: false, error: 'Bạn đã hoàn thành bài thi này rồi' };
       }
     }
