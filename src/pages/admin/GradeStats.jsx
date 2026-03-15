@@ -11,6 +11,7 @@ const GradeStats = () => {
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
     const [loadingClass, setLoadingClass] = useState(false);
+    const [showOverview, setShowOverview] = useState(true);
     const [assignments, setAssignments] = useState([]);
     const [classes, setClasses] = useState({});
     const [exams, setExams] = useState({});
@@ -177,11 +178,62 @@ const GradeStats = () => {
     const maxScore = scores.length > 0 ? formatScore(Math.max(...scores)) : '-';
     const minScore = scores.length > 0 ? formatScore(Math.min(...scores)) : '-';
 
+    // --- Overview chart data ---
+    // 1. Score distribution: buckets 0-2, 2-4, 4-5, 5-6, 6-7, 7-8, 8-9, 9-10
+    const scoreBuckets = [
+        { label: '0–2', min: 0, max: 2, color: '#ef4444' },
+        { label: '2–4', min: 2, max: 4, color: '#f97316' },
+        { label: '4–5', min: 4, max: 5, color: '#eab308' },
+        { label: '5–6', min: 5, max: 6, color: '#84cc16' },
+        { label: '6–7', min: 6, max: 7, color: '#22c55e' },
+        { label: '7–8', min: 7, max: 8, color: '#10b981' },
+        { label: '8–9', min: 8, max: 9, color: '#06b6d4' },
+        { label: '9–10', min: 9, max: 10.01, color: '#6366f1' },
+    ];
+    const bucketCounts = scoreBuckets.map(b =>
+        scores.filter(s => s >= b.min && s < b.max).length
+    );
+    const bucketMax = Math.max(...bucketCounts, 1);
+
+    // 2. Graded vs pending donut
+    const pendingSubs = filteredSubmissions.filter(s => s.status !== 'graded');
+    const total = filteredSubmissions.length;
+    const gradedPct = total > 0 ? (gradedSubs.length / total) * 100 : 0;
+    // SVG donut: r=40, circumference~251
+    const CIRC = 2 * Math.PI * 40;
+    const gradedDash = (gradedPct / 100) * CIRC;
+
+    // 3. Avg score per assignment (top 8)
+    const assignmentAvgs = visibleAssignments.map(a => {
+        const subs = gradedSubs.filter(s => s.assignmentId === a.id);
+        const exam = exams[a.examId];
+        const aScores = subs.map(s =>
+            exam?.type !== 'upload' ? ((s.totalScore || 0) / (s.maxScore || 1)) * 10 : (s.totalScore || 0)
+        );
+        return {
+            label: exam?.title || 'Bài thi',
+            avg: aScores.length > 0 ? aScores.reduce((x, y) => x + y, 0) / aScores.length : null,
+            count: subs.length,
+        };
+    }).filter(x => x.avg !== null).slice(0, 8);
+    const assignmentAvgMax = Math.max(...assignmentAvgs.map(x => x.avg), 10);
+
     // Group by student for table
     // Each row = 1 submission, showing student + class + assignment + score + status
-    const tableRows = filteredSubmissions.sort((a, b) => {
-        if (a.className !== b.className) return a.className.localeCompare(b.className);
-        return (a.studentName || '').localeCompare(b.studentName || '');
+    const getDisplayScore = (sub) => {
+        if (sub.status !== 'graded') return -1;
+        const exam = exams[sub.examId];
+        if (exam?.type !== 'upload') {
+            return ((sub.totalScore || 0) / (sub.maxScore || 1)) * 10;
+        }
+        return sub.totalScore || 0;
+    };
+
+    const tableRows = [...filteredSubmissions].sort((a, b) => {
+        const scoreDiff = getDisplayScore(b) - getDisplayScore(a);
+        if (scoreDiff !== 0) return scoreDiff;
+        // Ngang điểm: nộp sớm hơn xếp trước
+        return (a.submittedAt?.seconds || 0) - (b.submittedAt?.seconds || 0);
     });
 
     if (loading) {
@@ -273,6 +325,160 @@ const GradeStats = () => {
                         Xóa bộ lọc
                     </button>
                 </div>
+            </div>
+
+            {/* Overview toggle */}
+            <div className="clay-card overflow-hidden">
+                <button
+                    onClick={() => setShowOverview(v => !v)}
+                    className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
+                >
+                    <span className="flex items-center gap-2 font-semibold text-[#111812] dark:text-white">
+                        <Icon name="insights" className="text-primary" />
+                        Tổng quan phân tích
+                    </span>
+                    <Icon
+                        name={showOverview ? 'expand_less' : 'expand_more'}
+                        className="text-[#608a67] dark:text-[#8ba890]"
+                    />
+                </button>
+
+                {showOverview && (
+                    <div className="px-5 pb-5 border-t border-gray-100 dark:border-gray-800">
+                        {scores.length === 0 ? (
+                            <div className="py-8 text-center text-[#608a67] dark:text-[#8ba890] text-sm">
+                                Chưa có bài đã chấm để hiển thị biểu đồ
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-5">
+
+                                {/* Chart 1: Score distribution histogram */}
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-[#608a67] dark:text-[#8ba890] mb-3 flex items-center gap-1">
+                                        <Icon name="bar_chart" className="text-sm" />
+                                        Phân bố điểm
+                                    </p>
+                                    <div className="flex items-end gap-1.5 h-32">
+                                        {scoreBuckets.map((b, i) => {
+                                            const h = bucketCounts[i] > 0 ? Math.max((bucketCounts[i] / bucketMax) * 100, 6) : 0;
+                                            return (
+                                                <div key={b.label} className="flex-1 flex flex-col items-center gap-1 group relative">
+                                                    {bucketCounts[i] > 0 && (
+                                                        <span className="text-[10px] font-bold text-[#111812] dark:text-white">
+                                                            {bucketCounts[i]}
+                                                        </span>
+                                                    )}
+                                                    <div className="w-full relative" style={{ height: '96px' }}>
+                                                        <div
+                                                            className="absolute bottom-0 w-full rounded-t-md transition-all duration-500"
+                                                            style={{ height: `${h}%`, backgroundColor: b.color, opacity: bucketCounts[i] === 0 ? 0.15 : 1 }}
+                                                        />
+                                                    </div>
+                                                    <span className="text-[9px] text-[#608a67] dark:text-[#8ba890] text-center leading-tight">{b.label}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap gap-1.5">
+                                        {[
+                                            { label: 'Yếu (<5)', color: '#ef4444', pct: scores.filter(s => s < 5).length },
+                                            { label: 'TB (5–6.9)', color: '#eab308', pct: scores.filter(s => s >= 5 && s < 7).length },
+                                            { label: 'Khá (7–8.4)', color: '#10b981', pct: scores.filter(s => s >= 7 && s < 8.5).length },
+                                            { label: 'Giỏi (≥8.5)', color: '#6366f1', pct: scores.filter(s => s >= 8.5).length },
+                                        ].map(l => (
+                                            <span key={l.label} className="flex items-center gap-1 text-[10px] text-[#608a67] dark:text-[#8ba890]">
+                                                <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: l.color }} />
+                                                {l.label}: <b className="text-[#111812] dark:text-white">{l.pct}</b>
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Chart 2: Graded vs pending donut */}
+                                <div className="flex flex-col items-center">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-[#608a67] dark:text-[#8ba890] mb-3 flex items-center gap-1 self-start">
+                                        <Icon name="donut_large" className="text-sm" />
+                                        Tỉ lệ chấm bài
+                                    </p>
+                                    <div className="relative w-32 h-32">
+                                        <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                                            <circle cx="50" cy="50" r="40" fill="none" stroke="#e5e7eb" strokeWidth="14" className="dark:stroke-gray-700" />
+                                            <circle
+                                                cx="50" cy="50" r="40" fill="none"
+                                                stroke="#22c55e" strokeWidth="14"
+                                                strokeDasharray={`${gradedDash} ${CIRC}`}
+                                                strokeLinecap="round"
+                                                style={{ transition: 'stroke-dasharray 0.6s ease' }}
+                                            />
+                                            {pendingSubs.length > 0 && (
+                                                <circle
+                                                    cx="50" cy="50" r="40" fill="none"
+                                                    stroke="#eab308" strokeWidth="14"
+                                                    strokeDasharray={`${CIRC - gradedDash} ${CIRC}`}
+                                                    strokeDashoffset={-gradedDash}
+                                                    strokeLinecap="round"
+                                                />
+                                            )}
+                                        </svg>
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                            <span className="text-xl font-bold text-[#111812] dark:text-white">
+                                                {Math.round(gradedPct)}%
+                                            </span>
+                                            <span className="text-[10px] text-[#608a67] dark:text-[#8ba890]">đã chấm</span>
+                                        </div>
+                                    </div>
+                                    <div className="mt-3 flex gap-4 text-xs text-[#608a67] dark:text-[#8ba890]">
+                                        <span className="flex items-center gap-1">
+                                            <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
+                                            Đã chấm: <b className="text-[#111812] dark:text-white ml-0.5">{gradedSubs.length}</b>
+                                        </span>
+                                        <span className="flex items-center gap-1">
+                                            <span className="w-2.5 h-2.5 rounded-full bg-yellow-400 inline-block" />
+                                            Chờ: <b className="text-[#111812] dark:text-white ml-0.5">{pendingSubs.length}</b>
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Chart 3: Avg score per assignment */}
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-[#608a67] dark:text-[#8ba890] mb-3 flex items-center gap-1">
+                                        <Icon name="assignment_turned_in" className="text-sm" />
+                                        Điểm TB theo bài giao
+                                    </p>
+                                    {assignmentAvgs.length === 0 ? (
+                                        <p className="text-xs text-[#608a67] dark:text-[#8ba890] italic">Không có dữ liệu</p>
+                                    ) : (
+                                        <div className="flex flex-col gap-2">
+                                            {assignmentAvgs.map((a, i) => {
+                                                const pct = (a.avg / assignmentAvgMax) * 100;
+                                                const barColor = a.avg >= 8 ? '#6366f1' : a.avg >= 6.5 ? '#10b981' : a.avg >= 5 ? '#eab308' : '#ef4444';
+                                                return (
+                                                    <div key={i} className="flex items-center gap-2">
+                                                        <span className="text-[11px] text-[#608a67] dark:text-[#8ba890] w-24 truncate shrink-0" title={a.label}>
+                                                            {a.label}
+                                                        </span>
+                                                        <div className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-full h-4 overflow-hidden">
+                                                            <div
+                                                                className="h-full rounded-full transition-all duration-500 flex items-center justify-end pr-1.5"
+                                                                style={{ width: `${pct}%`, backgroundColor: barColor, minWidth: '28px' }}
+                                                            >
+                                                                <span className="text-[9px] font-bold text-white">{formatScore(a.avg)}</span>
+                                                            </div>
+                                                        </div>
+                                                        <span className="text-[10px] text-[#608a67] dark:text-[#8ba890] w-8 text-right shrink-0">
+                                                            ({a.count})
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Summary Stats */}

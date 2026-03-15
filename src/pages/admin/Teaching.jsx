@@ -59,11 +59,12 @@ const Teaching = () => {
 
   // Zoom avatar state
   const [zoomedAvatarId, setZoomedAvatarId] = useState(null);
+  const [zoomOrigin, setZoomOrigin] = useState({ x: '50%', y: '50%' });
 
   // Close zoomed avatar when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (zoomedAvatarId && !event.target.closest('.avatar-zoom-container')) {
+      if (zoomedAvatarId && !event.target.closest('.avatar-zoom-modal')) {
         setZoomedAvatarId(null);
       }
     };
@@ -808,9 +809,13 @@ const Teaching = () => {
                     </span>
                     {/* Avatar nhỏ */}
                     <div
-                      className={`w-15 h-15 flex-shrink-0 cursor-pointer avatar-zoom-container transition-transform duration-300 ${zoomedAvatarId === student.uid ? 'scale-[3] z-[100] relative' : 'relative z-10'}`}
-                      onClick={() => setZoomedAvatarId(prev => prev === student.uid ? null : student.uid)}
-                      onMouseLeave={() => { if (zoomedAvatarId === student.uid) setZoomedAvatarId(null); }}
+                      className="w-15 h-15 flex-shrink-0"
+                      onMouseEnter={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setZoomOrigin({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+                        setZoomedAvatarId(student.uid);
+                      }}
+                      onMouseLeave={() => setZoomedAvatarId(null)}
                     >
                       <Avatar
                         src={student.avatar}
@@ -883,9 +888,13 @@ const Teaching = () => {
 
                       {/* Avatar */}
                       <div
-                        className={`flex-shrink-0 cursor-pointer avatar-zoom-container transition-transform duration-300 ${zoomedAvatarId === student.uid ? 'scale-[3] z-[100] relative origin-center' : 'relative z-10'}`}
-                        onClick={() => setZoomedAvatarId(prev => prev === student.uid ? null : student.uid)}
-                        onMouseLeave={() => { if (zoomedAvatarId === student.uid) setZoomedAvatarId(null); }}
+                        className="flex-shrink-0"
+                        onMouseEnter={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setZoomOrigin({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+                          setZoomedAvatarId(student.uid);
+                        }}
+                        onMouseLeave={() => setZoomedAvatarId(null)}
                       >
                         <Avatar
                           src={student.avatar}
@@ -1340,6 +1349,47 @@ const Teaching = () => {
           </div>
         )
       }
+
+      {/* Avatar Zoom Modal */}
+      {zoomedAvatarId && (() => {
+        const zoomedStudent = students.find(s => s.uid === zoomedAvatarId);
+        if (!zoomedStudent) return null;
+        return (
+          <div
+            className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] pointer-events-none"
+            style={{ animation: 'fadeIn 0.25s ease' }}
+          >
+            <style>{`
+              @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+              @keyframes zoomFromOrigin {
+                from { transform: translate(var(--ox), var(--oy)) scale(0.1); opacity: 0; }
+                to   { transform: translate(0, 0) scale(1); opacity: 1; }
+              }
+            `}</style>
+            <div
+              className="avatar-zoom-modal flex flex-col items-center gap-6"
+              style={{
+                animation: 'zoomFromOrigin 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                '--ox': `${zoomOrigin.x - window.innerWidth / 2}px`,
+                '--oy': `${zoomOrigin.y - window.innerHeight / 2}px`,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Avatar
+                src={zoomedStudent.avatar}
+                name={zoomedStudent.fullName}
+                size="xl"
+                borderUrl={zoomedStudent.activeAvatarBorder}
+                border={true}
+                className="!size-100"
+              />
+              <span className="text-white text-2xl font-bold drop-shadow-lg text-center">
+                {zoomedStudent.fullName}
+              </span>
+            </div>
+          </div>
+        );
+      })()}
     </div >
   );
 };
