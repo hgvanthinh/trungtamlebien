@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Icon from '../common/Icon';
 
 /**
@@ -9,7 +9,15 @@ export function TrueFalseGridInput({ maxQuestions = 4, value = {}, onChange }) {
   const [focusedCell, setFocusedCell] = useState(null);
   const inputRefs = useRef({});
 
-  const questions = Array.from({ length: maxQuestions }, (_, i) => i + 1);
+  const filledMax = Math.max(...Object.keys(value).map(Number), 0);
+  const [visibleCount, setVisibleCount] = useState(() => Math.max(maxQuestions, filledMax));
+
+  useEffect(() => {
+    const max = Math.max(...Object.keys(value).map(Number), 0);
+    if (max > visibleCount) setVisibleCount(max);
+  }, [value]);
+
+  const questions = Array.from({ length: visibleCount }, (_, i) => i + 1);
   const subItems = ['a', 'b', 'c', 'd'];
 
   const handleAnswerChange = (questionNum, subItem, inputValue) => {
@@ -73,7 +81,7 @@ export function TrueFalseGridInput({ maxQuestions = 4, value = {}, onChange }) {
       case 'ArrowDown':
         e.preventDefault();
         // Move down to next question, same sub-item
-        if (currentQIndex < maxQuestions - 1) {
+        if (currentQIndex < visibleCount - 1) {
           const nextInput = inputRefs.current[`${questionNum + 1}-${subItem}`];
           if (nextInput) {
             nextInput.focus();
@@ -104,7 +112,7 @@ export function TrueFalseGridInput({ maxQuestions = 4, value = {}, onChange }) {
             nextInput.focus();
             nextInput.select();
           }
-        } else if (currentQIndex < maxQuestions - 1) {
+        } else if (currentQIndex < visibleCount - 1) {
           // Move to first sub-item of next question
           const nextInput = inputRefs.current[`${questionNum + 1}-a`];
           if (nextInput) {
@@ -142,7 +150,7 @@ export function TrueFalseGridInput({ maxQuestions = 4, value = {}, onChange }) {
                 nextInput.focus();
                 nextInput.select();
               }
-            } else if (currentQIndex < maxQuestions - 1) {
+            } else if (currentQIndex < visibleCount - 1) {
               const nextInput = inputRefs.current[`${questionNum + 1}-a`];
               if (nextInput) {
                 nextInput.focus();
@@ -169,7 +177,7 @@ export function TrueFalseGridInput({ maxQuestions = 4, value = {}, onChange }) {
       {/* Header with actions */}
       <div className="flex items-center justify-between">
         <div className="text-sm text-gray-600 dark:text-gray-400">
-          Đã nhập: <span className="font-bold text-primary">{fillCount}/{maxQuestions}</span> câu ({totalCells} ô)
+          Đã nhập: <span className="font-bold text-primary">{fillCount}/{visibleCount}</span> câu ({totalCells} ô)
         </div>
         <button
           type="button"
@@ -243,6 +251,16 @@ export function TrueFalseGridInput({ maxQuestions = 4, value = {}, onChange }) {
           ))}
         </div>
       </div>
+
+      {/* Add question button */}
+      <button
+        type="button"
+        onClick={() => setVisibleCount(c => c + 1)}
+        className="w-full flex items-center justify-center gap-2 py-2 text-sm text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg border border-dashed border-green-300 dark:border-green-700 transition"
+      >
+        <Icon name="add" className="text-base" />
+        Thêm câu {visibleCount + 1}
+      </button>
 
       {/* Help text */}
       <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Icon from '../common/Icon';
 
 /**
@@ -9,8 +9,22 @@ export function AbcdGridInput({ maxQuestions = 12, value = {}, onChange }) {
   const [focusedCell, setFocusedCell] = useState(null);
   const inputRefs = useRef({});
 
-  // Create array of question numbers
-  const questions = Array.from({ length: maxQuestions }, (_, i) => i + 1);
+  // Start with maxQuestions rows; expand freely with + button
+  const filledMax = Math.max(...Object.keys(value).map(Number), 0);
+  // visibleCount must always be even (2 columns)
+  const [visibleCount, setVisibleCount] = useState(() => {
+    const base = Math.max(maxQuestions, filledMax);
+    return base % 2 === 0 ? base : base + 1;
+  });
+
+  // Expand visible rows if value has more (e.g. after paste), keep even
+  useEffect(() => {
+    const max = Math.max(...Object.keys(value).map(Number), 0);
+    if (max > visibleCount) setVisibleCount(max % 2 === 0 ? max : max + 1);
+  }, [value]);
+
+  // Create array of question numbers up to visibleCount
+  const questions = Array.from({ length: visibleCount }, (_, i) => i + 1);
 
   const handleAnswerChange = (questionNum, answer) => {
     const upperAnswer = answer.toUpperCase();
@@ -38,7 +52,7 @@ export function AbcdGridInput({ maxQuestions = 12, value = {}, onChange }) {
       case 'ArrowDown':
         e.preventDefault();
         // Move to next row
-        if (currentIndex < maxQuestions - 1) {
+        if (currentIndex < visibleCount - 1) {
           const nextInput = inputRefs.current[questionNum + 1];
           if (nextInput) {
             nextInput.focus();
@@ -67,7 +81,7 @@ export function AbcdGridInput({ maxQuestions = 12, value = {}, onChange }) {
         // Auto-advance on letter input (A, B, C, D)
         if (['a', 'b', 'c', 'd', 'A', 'B', 'C', 'D'].includes(e.key)) {
           setTimeout(() => {
-            if (currentIndex < maxQuestions - 1) {
+            if (currentIndex < visibleCount - 1) {
               const nextInput = inputRefs.current[questionNum + 1];
               if (nextInput) {
                 nextInput.focus();
@@ -135,7 +149,7 @@ export function AbcdGridInput({ maxQuestions = 12, value = {}, onChange }) {
       {/* Header with actions */}
       <div className="flex items-center justify-between">
         <div className="text-sm text-gray-600 dark:text-gray-400">
-          Đã nhập: <span className="font-bold text-primary">{fillCount}/{maxQuestions}</span> câu
+          Đã nhập: <span className="font-bold text-primary">{fillCount}/{visibleCount}</span> câu
         </div>
         <div className="flex gap-2">
           <button
@@ -163,9 +177,9 @@ export function AbcdGridInput({ maxQuestions = 12, value = {}, onChange }) {
 
         {/* Data Rows - 2 columns */}
         <div className="grid grid-cols-2 divide-x divide-gray-300 dark:divide-gray-600">
-          {/* Column 1: Questions 1-6 */}
+          {/* Column 1: odd half */}
           <div>
-            {questions.slice(0, 6).map((num) => (
+            {questions.slice(0, visibleCount / 2).map((num) => (
               <div
                 key={num}
                 className="grid grid-cols-[80px_1fr] border-b border-gray-200 dark:border-gray-700 last:border-b-0"
@@ -191,9 +205,9 @@ export function AbcdGridInput({ maxQuestions = 12, value = {}, onChange }) {
             ))}
           </div>
 
-          {/* Column 2: Questions 7-12 */}
+          {/* Column 2: even half */}
           <div>
-            {questions.slice(6, 12).map((num) => (
+            {questions.slice(visibleCount / 2).map((num) => (
               <div
                 key={num}
                 className="grid grid-cols-[80px_1fr] border-b border-gray-200 dark:border-gray-700 last:border-b-0"
@@ -220,6 +234,16 @@ export function AbcdGridInput({ maxQuestions = 12, value = {}, onChange }) {
           </div>
         </div>
       </div>
+
+      {/* Add question button */}
+      <button
+        type="button"
+        onClick={() => setVisibleCount(c => c + 2)}
+        className="w-full flex items-center justify-center gap-2 py-2 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg border border-dashed border-blue-300 dark:border-blue-700 transition"
+      >
+        <Icon name="add" className="text-base" />
+        Thêm câu {visibleCount + 1} & {visibleCount + 2}
+      </button>
 
       {/* Help text */}
       <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">

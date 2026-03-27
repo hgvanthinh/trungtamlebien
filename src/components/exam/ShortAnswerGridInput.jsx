@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Icon from '../common/Icon';
 
 /**
@@ -9,7 +9,15 @@ export function ShortAnswerGridInput({ maxQuestions = 6, value = {}, onChange })
   const [focusedCell, setFocusedCell] = useState(null);
   const inputRefs = useRef({});
 
-  const questions = Array.from({ length: maxQuestions }, (_, i) => i + 1);
+  const filledMax = Math.max(...Object.keys(value).map(Number), 0);
+  const [visibleCount, setVisibleCount] = useState(() => Math.max(maxQuestions, filledMax));
+
+  useEffect(() => {
+    const max = Math.max(...Object.keys(value).map(Number), 0);
+    if (max > visibleCount) setVisibleCount(max);
+  }, [value]);
+
+  const questions = Array.from({ length: visibleCount }, (_, i) => i + 1);
 
   const handleAnswerChange = (questionNum, newAnswer) => {
     const newValue = { ...value };
@@ -32,7 +40,7 @@ export function ShortAnswerGridInput({ maxQuestions = 6, value = {}, onChange })
       case 'Enter':
       case 'ArrowDown':
         e.preventDefault();
-        if (currentIndex < maxQuestions - 1) {
+        if (currentIndex < visibleCount - 1) {
           const nextInput = inputRefs.current[questionNum + 1];
           if (nextInput) {
             nextInput.focus();
@@ -68,6 +76,10 @@ export function ShortAnswerGridInput({ maxQuestions = 6, value = {}, onChange })
         newValue[targetQuestion] = [line];
       }
     });
+
+    // Auto-expand visible rows to fit pasted data
+    const pastedMax = questionNum + lines.length - 1;
+    if (pastedMax > visibleCount) setVisibleCount(Math.min(pastedMax, maxQuestions));
 
     onChange(newValue);
   };
@@ -108,7 +120,7 @@ export function ShortAnswerGridInput({ maxQuestions = 6, value = {}, onChange })
       {/* Header with actions */}
       <div className="flex items-center justify-between">
         <div className="text-sm text-gray-600 dark:text-gray-400">
-          Đã nhập: <span className="font-bold text-primary">{fillCount}/{maxQuestions}</span> câu
+          Đã nhập: <span className="font-bold text-primary">{fillCount}/{visibleCount}</span> câu
         </div>
         <button
           type="button"
@@ -203,6 +215,16 @@ export function ShortAnswerGridInput({ maxQuestions = 6, value = {}, onChange })
           })}
         </div>
       </div>
+
+      {/* Add question button */}
+      <button
+        type="button"
+        onClick={() => setVisibleCount(c => c + 1)}
+        className="w-full flex items-center justify-center gap-2 py-2 text-sm text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg border border-dashed border-purple-300 dark:border-purple-700 transition"
+      >
+        <Icon name="add" className="text-base" />
+        Thêm câu {visibleCount + 1}
+      </button>
 
       {/* Help text */}
       <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">

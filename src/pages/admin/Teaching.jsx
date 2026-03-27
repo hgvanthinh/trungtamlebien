@@ -809,13 +809,12 @@ const Teaching = () => {
                     </span>
                     {/* Avatar nhỏ */}
                     <div
-                      className="w-15 h-15 flex-shrink-0"
-                      onMouseEnter={(e) => {
+                      className="w-15 h-15 flex-shrink-0 cursor-pointer"
+                      onClick={(e) => {
                         const rect = e.currentTarget.getBoundingClientRect();
                         setZoomOrigin({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
-                        setZoomedAvatarId(student.uid);
+                        setZoomedAvatarId(zoomedAvatarId === student.uid ? null : student.uid);
                       }}
-                      onMouseLeave={() => setZoomedAvatarId(null)}
                     >
                       <Avatar
                         src={student.avatar}
@@ -888,13 +887,12 @@ const Teaching = () => {
 
                       {/* Avatar */}
                       <div
-                        className="flex-shrink-0"
-                        onMouseEnter={(e) => {
+                        className="flex-shrink-0 cursor-pointer"
+                        onClick={(e) => {
                           const rect = e.currentTarget.getBoundingClientRect();
                           setZoomOrigin({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
-                          setZoomedAvatarId(student.uid);
+                          setZoomedAvatarId(zoomedAvatarId === student.uid ? null : student.uid);
                         }}
-                        onMouseLeave={() => setZoomedAvatarId(null)}
                       >
                         <Avatar
                           src={student.avatar}
