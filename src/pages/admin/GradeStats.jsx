@@ -229,6 +229,8 @@ const GradeStats = () => {
         return sub.totalScore || 0;
     };
 
+    const [gridView, setGridView] = useState(false);
+
     const tableRows = [...filteredSubmissions].sort((a, b) => {
         const scoreDiff = getDisplayScore(b) - getDisplayScore(a);
         if (scoreDiff !== 0) return scoreDiff;
@@ -516,86 +518,108 @@ const GradeStats = () => {
                 </div>
             ) : (
                 <div className="clay-card overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead>
-                                <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
-                                    <th className="text-left px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">STT</th>
-                                    <th className="text-left px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Học sinh</th>
-                                    <th className="text-left px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Lớp</th>
-                                    <th className="text-left px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Bài tập</th>
-                                    <th className="text-left px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Ngày nộp</th>
-                                    <th className="text-center px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Trạng thái</th>
-                                    <th className="text-center px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Điểm</th>
-                                    <th className="text-center px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Hành động</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {tableRows.map((sub, index) => {
-                                    const exam = exams[sub.examId];
-                                    return (
-                                        <tr
-                                            key={sub.id}
-                                            className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
-                                        >
-                                            <td className="px-4 py-3 text-sm text-[#608a67] dark:text-[#8ba890]">{index + 1}</td>
-                                            <td className="px-4 py-3">
-                                                <span className="font-medium text-[#111812] dark:text-white">{sub.studentName}</span>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-bold rounded-full">
-                                                    {sub.className}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-[#111812] dark:text-white max-w-[200px] truncate">
-                                                {exam?.title || 'N/A'}
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-[#608a67] dark:text-[#8ba890]">
-                                                {sub.submittedAt
-                                                    ? new Date(sub.submittedAt.seconds * 1000).toLocaleDateString('vi-VN')
-                                                    : 'N/A'}
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <span
-                                                    className={`px-2 py-0.5 rounded-full text-xs font-bold ${sub.status === 'graded'
-                                                        ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-                                                        : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400'
-                                                        }`}
-                                                >
-                                                    {sub.status === 'graded' ? 'Đã chấm' : 'Chờ chấm'}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <span
-                                                    className={`text-lg font-bold ${sub.status === 'graded'
-                                                        ? 'text-primary'
-                                                        : 'text-gray-400 dark:text-gray-600'
-                                                        }`}
-                                                >
-                                                    {sub.status === 'graded'
-                                                        ? (exam?.type !== 'upload' ? `${sub.totalScore || 0}/${sub.maxScore || 0}` : (sub.totalScore ?? '-'))
-                                                        : '–'}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                {exam?.type === 'upload' ? (
-                                                    <button
-                                                        onClick={() => navigate(`/admin/grade-submissions/${sub.id}`)}
-                                                        className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg text-sm font-medium hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all"
-                                                    >
-                                                        <Icon name="grading" className="inline mr-1 text-sm" />
-                                                        {sub.status === 'graded' ? 'Xem lại' : 'Chấm'}
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-xs font-medium px-2 py-1 bg-gray-100 dark:bg-gray-800 text-[#608a67] dark:text-[#8ba890] rounded-lg">Tự động chấm</span>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                        <span className="text-sm text-[#608a67] dark:text-[#8ba890]">{tableRows.length} bài nộp</span>
+                        <button
+                            onClick={() => setGridView(v => !v)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 text-[#608a67] dark:text-[#8ba890] rounded-lg text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-all"
+                        >
+                            <Icon name={gridView ? 'table_rows' : 'grid_view'} className="text-sm" />
+                            {gridView ? 'Dạng bảng' : 'Dạng lưới'}
+                        </button>
                     </div>
+
+                    {gridView ? (
+                        <div className="p-4 grid grid-cols-3 gap-3">
+                            {tableRows.map((sub, index) => {
+                                const exam = exams[sub.examId];
+                                const submittedDate = sub.submittedAt
+                                    ? new Date(sub.submittedAt.seconds * 1000).toLocaleString('vi-VN', {
+                                        timeZone: 'Asia/Ho_Chi_Minh',
+                                        day: '2-digit', month: '2-digit', year: 'numeric',
+                                        hour: '2-digit', minute: '2-digit',
+                                    })
+                                    : 'N/A';
+                                const scoreDisplay = sub.status === 'graded'
+                                    ? (exam?.type !== 'upload' ? `${sub.totalScore || 0}/${sub.maxScore || 0}` : (sub.totalScore ?? '-'))
+                                    : '–';
+                                return (
+                                    <div key={sub.id} className="flex items-center justify-between px-3 py-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-700">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <span className="text-xs text-[#608a67] dark:text-[#8ba890] shrink-0">{index + 1}.</span>
+                                            <div className="min-w-0">
+                                                <p className="font-semibold text-sm text-[#111812] dark:text-white truncate">{sub.studentName}</p>
+                                                <p className="text-xs text-[#608a67] dark:text-[#8ba890]">{submittedDate}</p>
+                                            </div>
+                                        </div>
+                                        <span className={`text-lg font-bold shrink-0 ml-2 ${sub.status === 'graded' ? 'text-primary' : 'text-gray-400 dark:text-gray-600'}`}>
+                                            {scoreDisplay}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead>
+                                    <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
+                                        <th className="text-left px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">STT</th>
+                                        <th className="text-left px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Học sinh</th>
+                                        <th className="text-left px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Lớp</th>
+                                        <th className="text-left px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Bài tập</th>
+                                        <th className="text-left px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Thời gian nộp</th>
+                                        <th className="text-center px-4 py-3 text-sm font-bold text-[#608a67] dark:text-[#8ba890]">Điểm</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {tableRows.map((sub, index) => {
+                                        const exam = exams[sub.examId];
+                                        return (
+                                            <tr
+                                                key={sub.id}
+                                                className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
+                                            >
+                                                <td className="px-4 py-3 text-sm text-[#608a67] dark:text-[#8ba890]">{index + 1}</td>
+                                                <td className="px-4 py-3">
+                                                    <span className="font-medium text-[#111812] dark:text-white">{sub.studentName}</span>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-bold rounded-full">
+                                                        {sub.className}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-[#111812] dark:text-white max-w-[200px] truncate">
+                                                    {exam?.title || 'N/A'}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-[#608a67] dark:text-[#8ba890]">
+                                                    {sub.submittedAt
+                                                        ? new Date(sub.submittedAt.seconds * 1000).toLocaleString('vi-VN', {
+                                                            timeZone: 'Asia/Ho_Chi_Minh',
+                                                            day: '2-digit', month: '2-digit', year: 'numeric',
+                                                            hour: '2-digit', minute: '2-digit',
+                                                        })
+                                                        : 'N/A'}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <span
+                                                        className={`text-lg font-bold ${sub.status === 'graded'
+                                                            ? 'text-primary'
+                                                            : 'text-gray-400 dark:text-gray-600'
+                                                            }`}
+                                                    >
+                                                        {sub.status === 'graded'
+                                                            ? (exam?.type !== 'upload' ? `${sub.totalScore || 0}/${sub.maxScore || 0}` : (sub.totalScore ?? '-'))
+                                                            : '–'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
