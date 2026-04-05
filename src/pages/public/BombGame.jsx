@@ -1,7 +1,8 @@
 // src/pages/public/BombGame.jsx
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { socket, movePlayer, placeBomb, leaveRoom, leaveGame } from '../../services/api/socket';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { socket, movePlayer, placeBomb, leaveRoom, leaveGame, spectateTournamentMatch, unspectateTournamentMatch, sendTournamentEmoji } from '../../services/api/socket';
+import SpectatorOverlayComponent from '../../components/game/SpectatorOverlay';
 import { auth } from '../../config/firebase';
 import { playSound, toggleMute, isMuted, playBGM, stopBGM } from '../../utils/audioManager';
 
@@ -142,6 +143,11 @@ const SVG = {
       <rect x="22" y="14" width="8" height="2.5" fill="#a78bfa" rx="1"/>
       <rect x="24.75" y="11.5" width="2.5" height="8" fill="#a78bfa" rx="1"/>
     </svg>`,
+    itemStar: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+      <rect width="32" height="32" fill="#0f172a" rx="3"/>
+      <polygon points="16,3 20,12 30,12 22,19 25,29 16,23 7,29 10,19 2,12 12,12" fill="#fbbf24" stroke="#f59e0b" stroke-width="1"/>
+      <polygon points="16,7 19.5,14 27,14 21,19 23.5,26 16,21.5 8.5,26 11,19 5,14 12.5,14" fill="#fde68a"/>
+    </svg>`,
 };
 const svgUrl = (s) => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
 
@@ -218,6 +224,12 @@ function PlayerPill({ player, isMe, compact = false }) {
                 <span className="flex items-center gap-px flex-shrink-0" style={{ fontSize: 10 }}>
                     <span>🔥</span>
                     <span className="text-white/70 font-bold" style={{ fontSize: 10, lineHeight: 1 }}>{player.range}</span>
+                </span>
+            )}
+            {player.stars > 0 && (
+                <span className="flex items-center gap-px flex-shrink-0" style={{ fontSize: 10 }}>
+                    <span>⭐</span>
+                    <span className="text-yellow-300 font-bold" style={{ fontSize: 10, lineHeight: 1 }}>{player.stars}</span>
                 </span>
             )}
         </div>
@@ -300,7 +312,7 @@ function GameOverOverlay({ winner, winnerName, currentUid, reward, reason, refun
                     <p className="text-white font-bold text-2xl">{title}</p>
                     <p className="text-gray-400 text-sm mt-1">{subtitle}</p>
                     {reason === 'timeout' && (
-                        <p className="text-gray-600 text-xs mt-2">⏰ Hết 5 phút</p>
+                        <p className="text-gray-600 text-xs mt-2">⏰ Hết giờ</p>
                     )}
                 </div>
 
@@ -331,10 +343,31 @@ function GameOverOverlay({ winner, winnerName, currentUid, reward, reason, refun
 export function BombGame() {
     const { roomId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const currentUid = auth.currentUser?.uid;
+
+    // Chế độ chơi: lấy từ navigation state (navigate('/...', { state: { mode, tournamentId } }))
+    const gameMode = location.state?.mode ?? 'loanDau'; // 'loanDau' | 'dauCap'
+    const tournamentId = location.state?.tournamentId ?? null;
+    const isDauCap = gameMode === 'dauCap';
 
     const [gameState, setGameState] = useState(null);
     const [gameOver, setGameOver] = useState(null);
+    // Spectator state (Đấu Cặp)
+    const [isSpectating, setIsSpectating] = useState(false);
+    const [spectatorMatchId, setSpectatorMatchId] = useState(null);
+    const [tournamentState, setTournamentState] = useState(null);
+    const [floatingEmojis, setFloatingEmojis] = useState([]);
+    const isSpectatingRef = useRef(false);
+
+    const addFloatingEmoji = useCallback((emoji, fromName = '') => {
+        const id = `em_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const x = window.innerWidth * 0.3 + Math.random() * window.innerWidth * 0.4;
+        setFloatingEmojis(prev => [...prev, { id, emoji, fromName, x }]);
+    }, []);
+    const removeFloatingEmoji = useCallback((id) => {
+        setFloatingEmojis(prev => prev.filter(e => e.id !== id));
+    }, []);
     const [showNames, setShowNames] = useState(false);
     const [connState, setConnState] = useState('connected'); // 'connected' | 'reconnecting' | 'lost'
     const [cellSize, setCellSize] = useState(34);
@@ -639,7 +672,26 @@ export function BombGame() {
     useEffect(() => {
         const onStart = ({ gameState: gs }) => { if (gs) setGameState(gs); };
         const onState = (gs) => setGameState(gs);
-        const onOver = (data) => setGameOver(data);
+        const onOver = (data) => {
+            setGameOver(data);
+            // Đấu Cặp: người thua → chuyển sang spectator mode
+            if (isDauCap && tournamentId && data.winner !== currentUid) {
+                setIsSpectating(true);
+                isSpectatingRef.current = true;
+            }
+        };
+
+        // Tournament: khi spectator join 1 trận mới → cập nhật game state cho trận đó
+        const onSpectateJoined = ({ gameState: gs }) => {
+            if (gs) setGameState(gs);
+        };
+        // Tournament state updates (bracket)
+        const onTournamentUpdated = (t) => setTournamentState(t);
+        const onTournamentJoined = (t) => setTournamentState(t);
+        // Emoji broadcast: hiện floating emoji
+        const onEmojiBC = ({ emoji, fromName }) => {
+            if (addFloatingEmoji) addFloatingEmoji(emoji, fromName);
+        };
 
         // Game đã xóa (disconnect rồi reconnect sau khi server cleanup)
         const onSyncErr = () => {
@@ -688,6 +740,10 @@ export function BombGame() {
         socket.on('disconnect', onDisconnect);
         socket.on('connect', onReconnect);
         socket.io.on('reconnect_attempt', onReconnectAttempt);
+        socket.on('tournament:spectate_joined', onSpectateJoined);
+        socket.on('tournament:updated', onTournamentUpdated);
+        socket.on('tournament:joined', onTournamentJoined);
+        socket.on('tournament:emoji_broadcast', onEmojiBC);
 
         // ── Khởi động: kết nối lại nếu cần (F5 / direct URL) ─
         async function initAndSync() {
@@ -759,6 +815,10 @@ export function BombGame() {
             socket.off('disconnect', onDisconnect);
             socket.off('connect', onReconnect);
             socket.io.off('reconnect_attempt', onReconnectAttempt);
+            socket.off('tournament:spectate_joined', onSpectateJoined);
+            socket.off('tournament:updated', onTournamentUpdated);
+            socket.off('tournament:joined', onTournamentJoined);
+            socket.off('tournament:emoji_broadcast', onEmojiBC);
             clearTimeout(fallbackTimer);
             if (lostTimer) clearTimeout(lostTimer);
         };
@@ -766,10 +826,14 @@ export function BombGame() {
 
     // ── Keyboard ──────────────────────────────────────────────
     const handleMove = useCallback((dir) => movePlayer(roomId, dir), [roomId]);
-    const handleBomb = useCallback(() => { playSound('placeBomb'); placeBomb(roomId); }, [roomId]);
+    const handleBomb = useCallback(() => {
+        if (isSpectatingRef.current) return;
+        playSound('placeBomb'); placeBomb(roomId);
+    }, [roomId]);
 
     // Hàm thực hiện 1 bước di chuyển (dùng chung cho keydown ngay lập tức và interval repeat)
     const doMove = useCallback((d) => {
+        if (isSpectatingRef.current) return; // spectator không thể di chuyển
         // 1. Gửi lệnh lên server (authoritative)
         handleMove(d);
 
@@ -1103,12 +1167,13 @@ export function BombGame() {
                     {/* Đồng hồ đếm ngược */}
                     {countdown !== null && (
                         <div className={`flex items-center gap-0.5 px-2 py-0.5 rounded-lg font-mono font-bold text-xs border flex-shrink-0
-                            ${countdown <= 30
+                            ${countdown <= (isDauCap ? 15 : 30)
                                 ? 'text-red-400 border-red-500/40 bg-red-500/10 animate-pulse'
-                                : countdown <= 60
+                                : countdown <= (isDauCap ? 30 : 60)
                                     ? 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10'
                                     : 'text-white border-white/10 bg-white/5'}`}
                         >
+                            {isDauCap && <span className="mr-0.5">⚔️</span>}
                             ⏱ {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
                         </div>
                     )}
@@ -1278,7 +1343,9 @@ export function BombGame() {
                         {/* Layer 1.6: Items — vật phẩm ẩn trong block */}
                         {(gameState.items || []).map(item => {
                             const svgKey = item.type === 'life' ? 'itemLife'
-                                : item.type === 'range' ? 'itemRange' : 'itemBomb';
+                                : item.type === 'range' ? 'itemRange'
+                                : item.type === 'star' ? 'itemStar'
+                                : 'itemBomb';
                             return (
                                 <div key={item.id} style={{
                                     position: 'absolute',
@@ -1351,7 +1418,7 @@ export function BombGame() {
                     </div>
 
                     {/* ── Overlays ── */}
-                    {gameOver && (
+                    {gameOver && !isSpectating && (
                         <GameOverOverlay
                             winner={gameOver.winner}
                             winnerName={gameOver.winnerName}
@@ -1360,6 +1427,25 @@ export function BombGame() {
                             refundedUids={gameOver.refundedUids ?? []}
                             currentUid={currentUid}
                             onBack={handleBack}
+                        />
+                    )}
+
+                    {/* Spectator overlay (Đấu Cặp) */}
+                    {isSpectating && (
+                        <SpectatorOverlayComponent
+                            tournamentId={tournamentId}
+                            tournament={tournamentState}
+                            activeMatchId={spectatorMatchId}
+                            onWatch={(matchId) => {
+                                if (spectatorMatchId) unspectateTournamentMatch(tournamentId, spectatorMatchId);
+                                spectateTournamentMatch(tournamentId, matchId);
+                                setSpectatorMatchId(matchId);
+                            }}
+                            onStopWatch={() => setSpectatorMatchId(null)}
+                            isWatching={!!spectatorMatchId}
+                            floatingEmojis={floatingEmojis}
+                            addFloatingEmoji={addFloatingEmoji}
+                            removeFloatingEmoji={removeFloatingEmoji}
                         />
                     )}
 

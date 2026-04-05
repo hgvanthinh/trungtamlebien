@@ -11,6 +11,12 @@ import {
     leaveRoom,
     toggleReady,
     startGame,
+    joinLoandauQueue,
+    leaveLoandauQueue,
+    startLoandauSplit,
+    createTournament,
+    joinTournament,
+    fetchTournamentList,
 } from '../../services/api/socket';
 import { auth } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -200,6 +206,18 @@ export function GameLobby() {
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [newRoomName, setNewRoomName] = useState('');
 
+    // Chế độ chơi: 'select' | 'loanDau' | 'dauCap'
+    const [lobbyMode, setLobbyMode] = useState('select');
+
+    // Loạn Đấu queue
+    const [loandauQueue, setLoandauQueue] = useState(null); // { players, count, hostUid }
+    const [inQueue, setInQueue] = useState(false);
+
+    // Đấu Cặp tournament list
+    const [tournaments, setTournaments] = useState([]);
+    const [showCreateTournament, setShowCreateTournament] = useState(false);
+    const [newTournamentName, setNewTournamentName] = useState('');
+
     const currentUid = auth.currentUser?.uid;
     const { userProfile } = useAuth();
 
@@ -208,12 +226,24 @@ export function GameLobby() {
         function onConnect() { setConnected(true); setConnecting(false); }
         function onDisconnect() { setConnected(false); setCurrentRoom(null); }
         function onRoomsList(data) { setRooms(data); }
-        function onRoomJoined(room) { setCurrentRoom(room); setRoomError(''); }
+        function onRoomJoined(room) {
+            setCurrentRoom(room);
+            setRoomError('');
+            // Nếu đang ở queue Loạn Đấu → server tự join phòng, chuyển sang lobby mode
+            setInQueue(false);
+            setLobbyMode('loanDau');
+        }
         function onRoomUpdated(room) {
             setCurrentRoom(prev => prev?.id === room.id ? room : prev);
         }
         function onRoomError({ message }) { setRoomError(message); }
         function onGameStart({ roomId }) { navigate(`/phaser-game/${roomId}`); }
+
+        // Loạn Đấu queue
+        function onLoandauQueueUpdate(data) { setLoandauQueue(data); }
+
+        // Tournament list
+        function onTournamentList(data) { setTournaments(data); }
 
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
@@ -222,6 +252,8 @@ export function GameLobby() {
         socket.on('room:updated', onRoomUpdated);
         socket.on('room:error', onRoomError);
         socket.on('game:start', onGameStart);
+        socket.on('loandau:queue_update', onLoandauQueueUpdate);
+        socket.on('tournament:list', onTournamentList);
 
         if (socket.connected) setConnected(true);
 
@@ -233,6 +265,8 @@ export function GameLobby() {
             socket.off('room:updated', onRoomUpdated);
             socket.off('room:error', onRoomError);
             socket.off('game:start', onGameStart);
+            socket.off('loandau:queue_update', onLoandauQueueUpdate);
+            socket.off('tournament:list', onTournamentList);
         };
     }, [navigate]);
 
@@ -277,6 +311,44 @@ export function GameLobby() {
         if (!currentRoom) return;
         startGame(currentRoom.id);
     }, [currentRoom]);
+
+    // ── Loạn Đấu Queue handlers ───────────────
+    const handleJoinQueue = useCallback(() => {
+        joinLoandauQueue();
+        setInQueue(true);
+    }, []);
+
+    const handleLeaveQueue = useCallback(() => {
+        leaveLoandauQueue();
+        setInQueue(false);
+        setLoandauQueue(null);
+    }, []);
+
+    const handleStartSplit = useCallback(() => {
+        startLoandauSplit();
+    }, []);
+
+    // ── Tournament handlers ───────────────────
+    const handleSelectDauCap = useCallback(() => {
+        setLobbyMode('dauCap');
+        fetchTournamentList();
+    }, []);
+
+    const handleCreateTournament = useCallback(() => {
+        if (!newTournamentName.trim()) return;
+        createTournament(newTournamentName.trim());
+        setNewTournamentName('');
+        setShowCreateTournament(false);
+        // Sau khi tạo sẽ nhận tournament:joined → navigate
+        socket.once('tournament:joined', (t) => {
+            navigate(`/tournament/${t.id}`);
+        });
+    }, [newTournamentName, navigate]);
+
+    const handleJoinTournament = useCallback((tournamentId) => {
+        joinTournament(tournamentId);
+        navigate(`/tournament/${tournamentId}`);
+    }, [navigate]);
 
     // ─────────────────────────────────────────
     // Render: Chưa kết nối
@@ -363,10 +435,8 @@ export function GameLobby() {
                     <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3
                         text-red-300 text-sm flex items-center justify-between gap-3">
                         <span>⚠️ {roomError}</span>
-                        <button
-                            onClick={() => setRoomError('')}
-                            className="text-red-400 hover:text-red-300 flex-shrink-0 text-base leading-none"
-                        >✕</button>
+                        <button onClick={() => setRoomError('')}
+                            className="text-red-400 hover:text-red-300 flex-shrink-0 text-base leading-none">✕</button>
                     </div>
                 )}
 
@@ -381,76 +451,233 @@ export function GameLobby() {
                     />
                 )}
 
-                {/* Danh sách phòng */}
-                {!currentRoom && (
-                    <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+                {/* ── Chọn chế độ ── */}
+                {!currentRoom && lobbyMode === 'select' && (
+                    <div className="flex flex-col gap-3">
+                        <p className="text-white/50 text-sm text-center">Chọn chế độ chơi</p>
+                        <button onClick={() => setLobbyMode('loanDau')}
+                            className="bg-white/5 hover:bg-white/10 border border-white/10 hover:border-indigo-500/40
+                                rounded-2xl p-5 flex items-center gap-4 text-left transition-all active:scale-[0.98]">
+                            <span className="text-4xl">💥</span>
+                            <div>
+                                <h3 className="text-white font-bold text-base">Loạn Đấu</h3>
+                                <p className="text-gray-400 text-sm mt-0.5">2–5 người · Tự do · 5 phút</p>
+                            </div>
+                            <span className="ml-auto text-white/30">›</span>
+                        </button>
+                        <button onClick={handleSelectDauCap}
+                            className="bg-white/5 hover:bg-white/10 border border-white/10 hover:border-yellow-500/40
+                                rounded-2xl p-5 flex items-center gap-4 text-left transition-all active:scale-[0.98]">
+                            <span className="text-4xl">🏆</span>
+                            <div>
+                                <h3 className="text-white font-bold text-base">Đấu Cặp</h3>
+                                <p className="text-gray-400 text-sm mt-0.5">Giải đấu 1v1 · 90 giây · Ngôi sao</p>
+                            </div>
+                            <span className="ml-auto text-white/30">›</span>
+                        </button>
+                    </div>
+                )}
 
-                        {/* Toolbar phòng */}
-                        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
-                            <h2 className="text-white font-semibold text-sm">
-                                Danh sách phòng
-                                <span className="text-gray-500 font-normal ml-2">({rooms.length})</span>
-                            </h2>
-                            <div className="flex items-center gap-2">
-                                {/* Tải lại — icon trên mobile, text trên desktop */}
-                                <button
-                                    id="btn-refresh-rooms"
-                                    onClick={() => socket.emit('rooms:refresh')}
-                                    title="Tải lại danh sách phòng"
-                                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold text-white
-                                        bg-gradient-to-r from-emerald-600 to-teal-600
-                                        hover:from-emerald-500 hover:to-teal-500
-                                        active:scale-95 transition-all duration-200
-                                        shadow-md shadow-emerald-500/20"
-                                >
-                                    <span>🔄</span>
-                                    <span className="hidden sm:inline">Tải lại</span>
-                                </button>
-                                <button
-                                    id="btn-create-room"
-                                    onClick={() => setShowCreateModal(true)}
-                                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white
-                                        bg-gradient-to-r from-indigo-600 to-purple-600
-                                        hover:from-indigo-500 hover:to-purple-500
-                                        active:scale-95 transition-all duration-200"
-                                >
-                                    <span>+</span>
-                                    <span className="hidden sm:inline">Tạo phòng</span>
-                                    <span className="sm:hidden">Tạo</span>
-                                </button>
+                {/* ── Loạn Đấu ── */}
+                {!currentRoom && lobbyMode === 'loanDau' && (
+                    <>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => setLobbyMode('select')}
+                                className="text-white/40 hover:text-white text-sm transition-colors">← Chế độ</button>
+                            <span className="text-white/20">|</span>
+                            <h2 className="text-white font-semibold text-sm">💥 Loạn Đấu</h2>
+                        </div>
+
+                        {/* Queue section */}
+                        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col gap-3">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-white/70 text-sm font-semibold">Hàng chờ tự động</h3>
+                                <span className="text-xs text-white/30">{loandauQueue?.count ?? 0} người</span>
+                            </div>
+                            {loandauQueue?.players?.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                    {loandauQueue.players.map(p => (
+                                        <span key={p.uid} className="text-xs bg-white/10 text-white/70 px-2 py-0.5 rounded-full">
+                                            {p.uid === currentUid ? '★ ' : ''}{p.name}
+                                            {p.uid === loandauQueue.hostUid ? ' 👑' : ''}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="flex gap-2">
+                                {!inQueue ? (
+                                    <button onClick={handleJoinQueue}
+                                        className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white
+                                            bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all">
+                                        Vào hàng chờ
+                                    </button>
+                                ) : (
+                                    <>
+                                        <button onClick={handleLeaveQueue}
+                                            className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white/60
+                                                border border-white/10 hover:bg-white/5 active:scale-95 transition-all">
+                                            Rời hàng chờ
+                                        </button>
+                                        {loandauQueue?.hostUid === currentUid && (loandauQueue?.count ?? 0) >= 2 && (
+                                            <button onClick={handleStartSplit}
+                                                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white
+                                                    bg-gradient-to-r from-orange-500 to-red-500
+                                                    hover:from-orange-400 hover:to-red-400
+                                                    active:scale-95 transition-all">
+                                                🚀 Phân phòng ({loandauQueue.count} người)
+                                            </button>
+                                        )}
+                                        {loandauQueue?.hostUid === currentUid && (loandauQueue?.count ?? 0) < 2 && (
+                                            <span className="flex-1 text-center text-white/30 text-sm py-2.5">Chờ thêm người...</span>
+                                        )}
+                                        {loandauQueue?.hostUid !== currentUid && (
+                                            <span className="flex-1 text-center text-white/30 text-sm py-2.5">Chờ host bắt đầu...</span>
+                                        )}
+                                    </>
+                                )}
                             </div>
                         </div>
 
-                        {/* Danh sách */}
-                        {rooms.length === 0 ? (
-                            <div className="py-14 flex flex-col items-center gap-3 text-gray-600">
-                                <span className="text-4xl">🏜️</span>
-                                <p className="text-sm text-center px-4">
-                                    Chưa có phòng nào.<br />Hãy tạo phòng đầu tiên!
-                                </p>
-                                <button
-                                    onClick={() => setShowCreateModal(true)}
-                                    className="mt-1 px-5 py-2.5 rounded-xl text-sm font-semibold text-white
-                                        bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all"
-                                >
-                                    + Tạo phòng ngay
-                                </button>
+                        {/* Hoặc tự tạo phòng */}
+                        <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+                            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
+                                <h2 className="text-white font-semibold text-sm">
+                                    Phòng thủ công
+                                    <span className="text-gray-500 font-normal ml-2">({rooms.filter(r => !r.tournamentId).length})</span>
+                                </h2>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={() => socket.emit('rooms:refresh')}
+                                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold text-white
+                                            bg-gradient-to-r from-emerald-600 to-teal-600
+                                            hover:from-emerald-500 hover:to-teal-500 active:scale-95 transition-all">
+                                        <span>🔄</span>
+                                    </button>
+                                    <button onClick={() => setShowCreateModal(true)}
+                                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white
+                                            bg-gradient-to-r from-indigo-600 to-purple-600
+                                            hover:from-indigo-500 hover:to-purple-500 active:scale-95 transition-all">
+                                        <span>+ Tạo</span>
+                                    </button>
+                                </div>
                             </div>
-                        ) : (
-                            <div className="flex flex-col gap-2 p-3">
-                                {rooms.map(room => (
-                                    <RoomCard
-                                        key={room.id}
-                                        room={room}
-                                        currentUid={currentUid}
-                                        onJoin={handleJoinRoom}
-                                    />
-                                ))}
+                            {rooms.filter(r => !r.tournamentId).length === 0 ? (
+                                <div className="py-10 flex flex-col items-center gap-3 text-gray-600">
+                                    <span className="text-3xl">🏜️</span>
+                                    <p className="text-sm">Chưa có phòng nào.</p>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-2 p-3">
+                                    {rooms.filter(r => !r.tournamentId).map(room => (
+                                        <RoomCard key={room.id} room={room} currentUid={currentUid} onJoin={handleJoinRoom} />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </>
+                )}
+
+                {/* ── Đấu Cặp ── */}
+                {!currentRoom && lobbyMode === 'dauCap' && (
+                    <>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => setLobbyMode('select')}
+                                className="text-white/40 hover:text-white text-sm transition-colors">← Chế độ</button>
+                            <span className="text-white/20">|</span>
+                            <h2 className="text-white font-semibold text-sm">🏆 Đấu Cặp</h2>
+                        </div>
+
+                        <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+                            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
+                                <h2 className="text-white font-semibold text-sm">
+                                    Giải đấu
+                                    <span className="text-gray-500 font-normal ml-2">({tournaments.length})</span>
+                                </h2>
+                                <div className="flex gap-2">
+                                    <button onClick={fetchTournamentList}
+                                        className="px-3 py-2 rounded-xl text-sm font-bold text-white
+                                            bg-gradient-to-r from-emerald-600 to-teal-600
+                                            hover:from-emerald-500 hover:to-teal-500 active:scale-95 transition-all">
+                                        🔄
+                                    </button>
+                                    <button onClick={() => setShowCreateTournament(true)}
+                                        className="px-3 py-2 rounded-xl text-sm font-semibold text-white
+                                            bg-gradient-to-r from-yellow-600 to-orange-600
+                                            hover:from-yellow-500 hover:to-orange-500 active:scale-95 transition-all">
+                                        + Tạo giải
+                                    </button>
+                                </div>
                             </div>
-                        )}
-                    </div>
+                            {tournaments.length === 0 ? (
+                                <div className="py-10 flex flex-col items-center gap-3 text-gray-600">
+                                    <span className="text-3xl">🏆</span>
+                                    <p className="text-sm text-center">Chưa có giải đấu nào.<br />Hãy tạo giải đầu tiên!</p>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-2 p-3">
+                                    {tournaments.map(t => (
+                                        <div key={t.id}
+                                            className="bg-white/5 border border-white/10 rounded-xl p-3 flex items-center gap-3">
+                                            <span className="text-2xl">🏆</span>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-white font-semibold text-sm truncate">{t.name}</p>
+                                                <p className="text-gray-500 text-xs">
+                                                    {t.playerCount} người · {t.status === 'lobby' ? 'Đang chờ' : 'Đang đấu'}
+                                                </p>
+                                            </div>
+                                            <button onClick={() => handleJoinTournament(t.id)}
+                                                disabled={t.status !== 'lobby'}
+                                                className="px-4 py-2 rounded-xl text-sm font-semibold text-white
+                                                    bg-yellow-600 hover:bg-yellow-500 active:scale-95 transition-all
+                                                    disabled:opacity-30 disabled:cursor-not-allowed">
+                                                {t.status === 'lobby' ? 'Vào' : 'Đang đấu'}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </>
                 )}
             </div>
+
+            {/* ── Modal Tạo Giải Đấu ── */}
+            {showCreateTournament && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+                    onClick={e => { if (e.target === e.currentTarget) { setShowCreateTournament(false); setNewTournamentName(''); } }}>
+                    <div className="w-full max-w-sm bg-gray-900 border border-white/10 rounded-2xl p-6 flex flex-col gap-5 shadow-2xl">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-white font-bold text-lg">🏆 Tạo giải đấu</h3>
+                            <button onClick={() => { setShowCreateTournament(false); setNewTournamentName(''); }}
+                                className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-gray-400 hover:text-white">✕</button>
+                        </div>
+                        <input
+                            type="text"
+                            value={newTournamentName}
+                            onChange={e => setNewTournamentName(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleCreateTournament()}
+                            placeholder="Tên giải đấu..."
+                            autoFocus
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5
+                                text-white placeholder-gray-600 text-sm outline-none
+                                focus:border-yellow-500/50 transition-all"
+                        />
+                        <div className="flex gap-3">
+                            <button onClick={() => { setShowCreateTournament(false); setNewTournamentName(''); }}
+                                className="flex-1 py-3 rounded-xl font-semibold text-sm text-gray-400
+                                    border border-white/10 hover:bg-white/5 transition-all active:scale-95">
+                                Hủy
+                            </button>
+                            <button onClick={handleCreateTournament} disabled={!newTournamentName.trim()}
+                                className="flex-1 py-3 rounded-xl font-bold text-sm text-white
+                                    bg-gradient-to-r from-yellow-600 to-orange-600
+                                    hover:from-yellow-500 hover:to-orange-500
+                                    disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all">
+                                Tạo giải
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ── Modal Tạo Phòng ── */}
             {showCreateModal && (

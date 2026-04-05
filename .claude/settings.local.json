@@ -17,7 +17,8 @@
       "Bash(powershell -Command:*)",
       "Bash(powershell:*)",
       "Bash(where:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Read(//e/Website/**)"
     ]
   }
 }

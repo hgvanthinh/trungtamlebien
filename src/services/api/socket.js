@@ -66,3 +66,20 @@ export const movePlayer = (roomId, direction) => socket.emit('game:move', { room
 export const placeBomb = (roomId) => socket.emit('game:bomb', { roomId });
 /** Thoát khỏi game đang diễn ra (nhấn X trong game) — server sẽ xử lý thua + kết thúc game */
 export const leaveGame = (roomId) => socket.emit('game:leave', { roomId });
+
+// ── Loạn Đấu Queue ───────────────────────────
+export const joinLoandauQueue = () => socket.emit('loandau:join_queue');
+export const leaveLoandauQueue = () => socket.emit('loandau:leave_queue');
+export const startLoandauSplit = () => socket.emit('loandau:start_split');
+
+// ── Tournament ───────────────────────────────
+export const createTournament = (name) => socket.emit('tournament:create', { name });
+export const joinTournament = (tournamentId) => socket.emit('tournament:join', { tournamentId });
+export const leaveTournament = (tournamentId) => socket.emit('tournament:leave', { tournamentId });
+export const sendChallenge = (tournamentId, targetUid) => socket.emit('tournament:challenge', { tournamentId, targetUid });
+export const respondChallenge = (tournamentId, challengerUid, accepted) => socket.emit('tournament:challenge_respond', { tournamentId, challengerUid, accepted });
+export const startTournament = (tournamentId) => socket.emit('tournament:start', { tournamentId });
+export const fetchTournamentList = () => socket.emit('tournament:list');
+export const spectateTournamentMatch = (tournamentId, matchId) => socket.emit('tournament:spectate', { tournamentId, matchId });
+export const unspectateTournamentMatch = (tournamentId, matchId) => socket.emit('tournament:unspectate', { tournamentId, matchId });
+export const sendTournamentEmoji = (tournamentId, matchId, emoji) => socket.emit('tournament:emoji', { tournamentId, matchId, emoji });

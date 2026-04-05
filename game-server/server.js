@@ -123,6 +123,11 @@ io.use(async (socket, next) => {
 // ─────────────────────────────────────────────
 const rooms = new Map();        // roomId → RoomObject
 const gameStates = new Map();   // roomId → GameState
+const tournaments = new Map();  // tournamentId → TournamentObject
+const socketByUid = new Map();  // uid → socket (O(1) lookup)
+// Loạn Đấu queue (single global queue)
+const LOANDAU_QUEUE_ID = 'loandau_main';
+const loandauQueue = new Map(); // LOANDAU_QUEUE_ID → { hostUid, players, createdAt }
 
 function buildRoomSummary(room) {
     return {
@@ -134,12 +139,17 @@ function buildRoomSummary(room) {
 function getAllRooms() {
     return [...rooms.values()].map(r => buildRoomSummary(r));
 }
-function createRoom(hostUid, hostName, hostPhotoURL, roomName) {
+function createRoom(hostUid, hostName, hostPhotoURL, roomName, options = {}) {
     const id = `room_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const room = {
         id, name: roomName, host: hostUid,
         players: [{ uid: hostUid, name: hostName, photoURL: hostPhotoURL, isReady: false, isHost: true }],
-        status: 'waiting', maxPlayers: 99, createdAt: Date.now(),
+        status: 'waiting',
+        mode: options.mode ?? 'loanDau',       // 'loanDau' | 'dauCap'
+        maxPlayers: options.maxPlayers ?? 5,   // Loạn Đấu default = 5
+        tournamentId: options.tournamentId ?? null,
+        matchId: options.matchId ?? null,
+        createdAt: Date.now(),
     };
     rooms.set(id, room);
     return room;
@@ -247,10 +257,31 @@ async function rewardWinner(uid, playerCount) {
     }
 }
 
-/** Initialize game state for a room */
-function initGameState(room) {
+/** Ẩn items ngẫu nhiên dưới các ô gạch */
+function generateHiddenItems(blockPositions, playerCount, itemTypes) {
+    const hiddenItems = {};
+    let idx = 0;
+    for (const type of itemTypes) {
+        for (let k = 0; k < playerCount + 1 && idx < blockPositions.length; k++, idx++) {
+            const [r, c] = blockPositions[idx];
+            hiddenItems[`${r},${c}`] = type;
+        }
+    }
+    return hiddenItems;
+}
+
+/** Initialize game state for a room
+ * @param {object} room
+ * @param {object} [options]
+ * @param {number} [options.durationMs]   - override game duration (default GAME_DURATION_MS)
+ * @param {boolean} [options.noLifeItem]  - exclude 'life' items (Đấu Cặp mode)
+ * @param {string} [options.tournamentId] - link to tournament
+ * @param {string} [options.matchId]      - match ID within tournament
+ */
+function initGameState(room, options = {}) {
     const map = generateMap();
     const playerCount = room.players.length;
+    const durationMs = options.durationMs ?? GAME_DURATION_MS;
 
     // ── Ẩn vật phẩm ngẫu nhiên dưới các ô gạch ──
     const blockPositions = [];
@@ -264,16 +295,11 @@ function initGameState(room) {
         [blockPositions[i], blockPositions[j]] = [blockPositions[j], blockPositions[i]];
     }
 
-    // Mỗi loại item: số lượng = số người chơi + 1
-    const ITEM_TYPES = ['life', 'range', 'bomb'];
-    const hiddenItems = {};
-    let idx = 0;
-    for (const type of ITEM_TYPES) {
-        for (let k = 0; k < playerCount + 1 && idx < blockPositions.length; k++, idx++) {
-            const [r, c] = blockPositions[idx];
-            hiddenItems[`${r},${c}`] = type;
-        }
-    }
+    // Đấu Cặp: không có item 'life', thêm 'star' thay thế
+    const itemTypes = options.noLifeItem
+        ? ['range', 'bomb', 'star']
+        : ['life', 'range', 'bomb'];
+    const hiddenItems = generateHiddenItems(blockPositions, playerCount, itemTypes);
 
     const players = {};
     room.players.forEach((p, i) => {
@@ -286,15 +312,24 @@ function initGameState(room) {
             bombRange: BOMB_RANGE,
             maxBombs: 2,
             lastMove: 0,
+            stars: 0,  // dùng trong chế độ Đấu Cặp
         };
     });
-    return { map, players, bombs: [], explosions: [], items: [], hiddenItems, status: 'playing', winner: null, startedAt: Date.now() };
+    return {
+        map, players, bombs: [], explosions: [], items: [], hiddenItems,
+        status: 'playing', winner: null,
+        startedAt: Date.now(),
+        durationMs,
+        mode: room.mode ?? 'loanDau',
+        tournamentId: options.tournamentId ?? null,
+        matchId: options.matchId ?? null,
+    };
 }
 
 /** Public (serializable) game state sent to clients */
 function publicState(gs) {
     const elapsed = Date.now() - (gs.startedAt ?? Date.now());
-    const remaining = Math.max(0, GAME_DURATION_MS - elapsed);
+    const remaining = Math.max(0, (gs.durationMs ?? GAME_DURATION_MS) - elapsed);
     return {
         map: gs.map,
         players: gs.players,
@@ -305,6 +340,9 @@ function publicState(gs) {
         status: gs.status,
         winner: gs.winner,
         winnerName: gs.winner ? gs.players[gs.winner]?.name : null,
+        mode: gs.mode ?? 'loanDau',
+        tournamentId: gs.tournamentId ?? null,
+        matchId: gs.matchId ?? null,
     };
 }
 
@@ -379,16 +417,21 @@ async function explodeBomb(roomId, bombId) {
             // Tính trước để gửi cho client biết trước khi Firebase cập nhật xong
             const room = rooms.get(roomId);
             const reward = room ? calcReward(room.players.length) : 0;
-            io.to(roomId).emit('game:over', { winner: gs.winner, winnerName, reward });
+            io.to(roomId).emit('game:over', { winner: gs.winner, winnerName, reward: gs.tournamentId ? 0 : reward });
 
-            // Xu transactions — await để bắt lỗi đúng cách
-            if (room) {
+            // Xu transactions chỉ cho Loạn Đấu thường
+            if (room && !gs.tournamentId) {
                 try {
                     await deductEntryFees(room.players);
                     if (gs.winner) await rewardWinner(gs.winner, room.players.length);
                 } catch (e) {
                     console.error('[Xu] Transaction error (explodeBomb):', e.message);
                 }
+            }
+
+            // Nếu là tournament match → gọi handleMatchFinished
+            if (gs.tournamentId) {
+                await handleMatchFinished(roomId, gs.tournamentId, gs.matchId, gs.winner);
             }
 
             // Clean up after 15s
@@ -405,7 +448,11 @@ async function explodeBomb(roomId, bombId) {
 
 function broadcastState(roomId) {
     const gs = gameStates.get(roomId);
-    if (gs) io.to(roomId).emit('game:state', publicState(gs));
+    if (!gs) return;
+    const state = publicState(gs);
+    io.to(roomId).emit('game:state', state);
+    // Spectators trong chế độ Đấu Cặp cũng nhận state
+    io.to(`spec_${roomId}`).emit('game:state', state);
 }
 
 // ─────────────────────────────────────────────
@@ -437,6 +484,7 @@ app.get('/test-xu', async (req, res) => {
 io.on('connection', (socket) => {
     const { uid, name, email, photoURL } = socket.user;
     console.log(`✅ [Socket] Connected | ${socket.id} | ${email}`);
+    socketByUid.set(uid, socket);
 
     socket.emit('rooms:list', getAllRooms());
 
@@ -458,6 +506,7 @@ io.on('connection', (socket) => {
         if (!room) return socket.emit('room:error', { message: 'Phòng không tồn tại.' });
         if (room.status !== 'waiting') return socket.emit('room:error', { message: 'Phòng đang thi đấu.' });
         if (room.players.some(p => p.uid === uid)) return socket.emit('room:error', { message: 'Bạn đã trong phòng này.' });
+        if (room.players.length >= room.maxPlayers) return socket.emit('room:error', { message: `Phòng đã đủ ${room.maxPlayers} người.` });
         room.players.push({ uid, name, photoURL, isReady: false, isHost: false });
         socket.join(roomId);
         socket.emit('room:joined', room);
@@ -518,12 +567,31 @@ io.on('connection', (socket) => {
             gs2.status = 'finished';
 
             const alive = Object.values(gs2.players).filter(p => p.alive);
-            const maxLives = Math.max(...alive.map(p => p.lives ?? 0), 0);
-            const topPlayers = alive.filter(p => (p.lives ?? 0) === maxLives);
 
-            gs2.winner = topPlayers.length === 1 ? topPlayers[0].uid : null;
+            // Đấu Cặp: winner = người có nhiều sao hơn (tiebreak random nếu bằng)
+            let gs2Winner = null;
+            if (gs2.mode === 'dauCap') {
+                const allPlayers = Object.values(gs2.players);
+                const maxStars = Math.max(...allPlayers.map(p => p.stars ?? 0));
+                const topByStars = allPlayers.filter(p => (p.stars ?? 0) === maxStars);
+                if (topByStars.length === 1) {
+                    gs2Winner = topByStars[0].uid;
+                } else if (alive.length === 1) {
+                    gs2Winner = alive[0].uid; // người còn sống thắng dù sao ít hơn
+                } else if (topByStars.length > 1) {
+                    // random tiebreak
+                    gs2Winner = topByStars[Math.floor(Math.random() * topByStars.length)].uid;
+                }
+            } else {
+                // Loạn Đấu: winner = người nhiều mạng nhất
+                const maxLives = Math.max(...alive.map(p => p.lives ?? 0), 0);
+                const topPlayers = alive.filter(p => (p.lives ?? 0) === maxLives);
+                gs2Winner = topPlayers.length === 1 ? topPlayers[0].uid : null;
+            }
+
+            gs2.winner = gs2Winner;
             const winnerName = gs2.winner ? gs2.players[gs2.winner]?.name : null;
-            const isDraw = gs2.winner === null; // hòa: không ai thắng rõ ràng
+            const isDraw = gs2.winner === null;
 
             // Lấy room trước khi emit
             const room2 = rooms.get(roomId);
@@ -532,27 +600,28 @@ io.on('connection', (socket) => {
                 winner: gs2.winner,
                 winnerName,
                 reason: 'timeout',
-                reward: (!isDraw && room2) ? calcReward(room2.players.length) : 0,
-                // Hòa hết giờ → hoàn xu cho người còn sống
+                reward: (!isDraw && room2 && !gs2.tournamentId) ? calcReward(room2.players.length) : 0,
                 refundedUids: isDraw ? alive.map(p => p.uid) : [],
             });
             console.log(`⏰ [Game] Timeout | ${isDraw ? 'HÒA — hoàn xu người sống' : `Thắng: ${winnerName}`} | room: ${roomId}`);
 
-            if (room2) {
+            // Xu transactions chỉ dành cho Loạn Đấu thường (không phải tournament)
+            if (room2 && !gs2.tournamentId) {
                 try {
-                    // Trừ xu tất cả người chơi trước
                     await deductEntryFees(room2.players);
-
                     if (isDraw) {
-                        // Hòa hết giờ: hoàn lại 20 xu cho người còn sống
                         await refundSurvivors(room2.players, alive.map(p => p.uid));
                     } else {
-                        // Có người thắng rõ ràng: thưởng bình thường
                         await rewardWinner(gs2.winner, room2.players.length);
                     }
                 } catch (e) {
                     console.error('[Xu] Transaction error (gameTimer):', e.message);
                 }
+            }
+
+            // Nếu là tournament match → gọi handleMatchFinished
+            if (gs2.tournamentId) {
+                await handleMatchFinished(roomId, gs2.tournamentId, gs2.matchId, gs2.winner);
             }
 
             // Dọn sau 15s
@@ -561,9 +630,7 @@ io.on('connection', (socket) => {
                 const r = rooms.get(roomId);
                 if (r) { r.status = 'waiting'; r.players.forEach(p => p.isReady = false); io.emit('rooms:list', getAllRooms()); }
             }, 15000);
-        }, GAME_DURATION_MS);
-
-
+        }, gs.durationMs);
 
         // Lưu timer vào game state để có thể clearTimeout khi game kết thúc sớm
         gs._gameTimer = gameTimer;
@@ -604,6 +671,7 @@ io.on('connection', (socket) => {
             if (item.type === 'life') player.lives = Math.min((player.lives ?? 0) + 1, 5);
             if (item.type === 'range') player.bombRange = Math.min((player.bombRange ?? BOMB_RANGE) + 1, 8);
             if (item.type === 'bomb') player.maxBombs = Math.min((player.maxBombs ?? 2) + 2, 6);
+            if (item.type === 'star') player.stars = (player.stars ?? 0) + 1;
         }
 
         broadcastState(roomId);
@@ -677,12 +745,19 @@ io.on('connection', (socket) => {
             });
             console.log(`🏆 [Game] Over (forfeit) | winner: ${winnerName || 'none'} | room: ${roomId}`);
 
-            // Xu transactions
-            try {
-                await deductEntryFees(room.players);
-                if (gs.winner) await rewardWinner(gs.winner, room.players.length);
-            } catch (e) {
-                console.error('[Xu] Transaction error (game:leave):', e.message);
+            // Xu transactions chỉ cho Loạn Đấu thường
+            if (!gs.tournamentId) {
+                try {
+                    await deductEntryFees(room.players);
+                    if (gs.winner) await rewardWinner(gs.winner, room.players.length);
+                } catch (e) {
+                    console.error('[Xu] Transaction error (game:leave):', e.message);
+                }
+            }
+
+            // Tournament match
+            if (gs.tournamentId) {
+                await handleMatchFinished(roomId, gs.tournamentId, gs.matchId, gs.winner);
             }
 
             // Dọn sau 15s
@@ -722,6 +797,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', async (reason) => {
         console.log(`❌ [Socket] Disconnected | ${socket.id} | ${email} | ${reason}`);
+        socketByUid.delete(uid);
 
         for (const [roomId, room] of rooms.entries()) {
             if (!room.players.some(p => p.uid === uid)) continue;
@@ -767,12 +843,19 @@ io.on('connection', (socket) => {
                     });
                     console.log(`🏆 [Game] Over | winner: ${winnerName || 'none'} | room: ${roomId}`);
 
-                    // Xu
-                    try {
-                        await deductEntryFees(room.players);
-                        if (gs.winner) await rewardWinner(gs.winner, room.players.length);
-                    } catch (e) {
-                        console.error('[Xu] Transaction error (disconnect):', e.message);
+                    // Xu (chỉ Loạn Đấu thường)
+                    if (!gs.tournamentId) {
+                        try {
+                            await deductEntryFees(room.players);
+                            if (gs.winner) await rewardWinner(gs.winner, room.players.length);
+                        } catch (e) {
+                            console.error('[Xu] Transaction error (disconnect):', e.message);
+                        }
+                    }
+
+                    // Tournament match
+                    if (gs.tournamentId) {
+                        await handleMatchFinished(roomId, gs.tournamentId, gs.matchId, gs.winner);
                     }
 
                     // Dọn sau 15s
@@ -798,6 +881,502 @@ io.on('connection', (socket) => {
         }
     });
 });
+
+// ─────────────────────────────────────────────
+// 8b. Tournament Engine
+// ─────────────────────────────────────────────
+
+/** Serialize tournament state for clients */
+function publicTournamentState(t) {
+    return {
+        id: t.id, name: t.name, hostUid: t.hostUid, status: t.status,
+        players: t.players,
+        rounds: t.rounds.map(round =>
+            round.map(m => ({
+                matchId: m.matchId,
+                player1Uid: m.player1Uid,
+                player2Uid: m.player2Uid,
+                player3Uid: m.player3Uid ?? null,
+                roomId: m.roomId,
+                status: m.status,
+                winner: m.winner,
+            }))
+        ),
+        currentRound: t.currentRound,
+        champion: t.champion,
+        pendingChallenges: [...(t.pendingChallenges?.entries() ?? [])].map(
+            ([challengerUid, targetUid]) => ({ challengerUid, targetUid })
+        ),
+        acceptedPairs: t.acceptedPairs ?? [],
+    };
+}
+
+/** Tạo bracket từ danh sách người chơi + các cặp đã chấp nhận */
+function createTournamentBracket(players, acceptedPairs = []) {
+    const matches = [];
+    const paired = new Set();
+
+    // Ưu tiên cặp đã thách đấu
+    for (const [uid1, uid2] of acceptedPairs) {
+        if (!paired.has(uid1) && !paired.has(uid2)) {
+            const p1 = players.find(p => p.uid === uid1);
+            const p2 = players.find(p => p.uid === uid2);
+            if (p1 && p2) {
+                matches.push({
+                    matchId: `match_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+                    player1Uid: uid1, player2Uid: uid2, player3Uid: null,
+                    roomId: null, status: 'pending', winner: null,
+                });
+                paired.add(uid1);
+                paired.add(uid2);
+            }
+        }
+    }
+
+    // Ghép random phần còn lại
+    const remaining = players.filter(p => !paired.has(p.uid));
+    // Fisher-Yates shuffle
+    for (let i = remaining.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
+    }
+
+    for (let i = 0; i < remaining.length; i += 2) {
+        if (i + 1 < remaining.length) {
+            matches.push({
+                matchId: `match_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+                player1Uid: remaining[i].uid, player2Uid: remaining[i + 1].uid, player3Uid: null,
+                roomId: null, status: 'pending', winner: null,
+            });
+        } else {
+            // Số lẻ: ghép 3 người vào cặp trận cuối
+            if (matches.length > 0) {
+                matches[matches.length - 1].player3Uid = remaining[i].uid;
+            } else {
+                // Chỉ có 1 người duy nhất → bye (thắng luôn)
+                matches.push({
+                    matchId: `match_${Date.now()}_bye`,
+                    player1Uid: remaining[i].uid, player2Uid: null, player3Uid: null,
+                    roomId: null, status: 'finished', winner: remaining[i].uid,
+                });
+            }
+        }
+    }
+
+    return matches;
+}
+
+/** Bắt đầu một vòng tournament */
+async function startTournamentRound(tournamentId) {
+    const t = tournaments.get(tournamentId);
+    if (!t) return;
+
+    const round = t.rounds[t.currentRound];
+    console.log(`🏆 [Tournament] Starting round ${t.currentRound + 1} for "${t.name}" (${round.length} matches)`);
+
+    for (let i = 0; i < round.length; i++) {
+        const match = round[i];
+        if (match.status === 'finished') continue; // bye match
+
+        // Gom danh sách player cho trận này
+        const matchPlayerUids = [match.player1Uid, match.player2Uid, match.player3Uid].filter(Boolean);
+        const matchPlayers = matchPlayerUids.map(uid => t.players.find(p => p.uid === uid)).filter(Boolean);
+
+        // Tạo room riêng cho trận
+        const hostPlayer = matchPlayers[0];
+        const matchRoom = createRoom(
+            hostPlayer.uid, hostPlayer.name, hostPlayer.photoURL,
+            `[Đấu Cặp] Vòng ${t.currentRound + 1} - Trận ${i + 1}`,
+            {
+                mode: 'dauCap',
+                maxPlayers: matchPlayers.length,
+                tournamentId,
+                matchId: match.matchId,
+            }
+        );
+
+        // Thêm các player vào room (host đã có, thêm phần còn lại)
+        for (const p of matchPlayers.slice(1)) {
+            matchRoom.players.push({ uid: p.uid, name: p.name, photoURL: p.photoURL, isReady: true, isHost: false });
+        }
+        matchRoom.players[0].isReady = true;
+        matchRoom.status = 'playing';
+
+        // Init game state (Đấu Cặp: 90s, không có life item)
+        const gs = initGameState(matchRoom, {
+            durationMs: 90_000,
+            noLifeItem: true,
+            tournamentId,
+            matchId: match.matchId,
+        });
+        gameStates.set(matchRoom.id, gs);
+
+        match.roomId = matchRoom.id;
+        match.status = 'playing';
+
+        // Join socket rooms + notify players
+        for (const p of matchPlayers) {
+            const s = socketByUid.get(p.uid);
+            if (s) {
+                s.join(matchRoom.id);
+                s.emit('tournament:match_start', {
+                    matchId: match.matchId,
+                    roomId: matchRoom.id,
+                    tournamentId,
+                    opponentName: matchPlayers.filter(x => x.uid !== p.uid).map(x => x.name).join(' & '),
+                });
+                s.emit('game:start', { roomId: matchRoom.id, gameState: publicState(gs) });
+            }
+        }
+    }
+
+    io.to(`tournament_${tournamentId}`).emit('tournament:round_start', {
+        tournamentId,
+        round: t.currentRound,
+        matches: round.map(m => ({
+            matchId: m.matchId,
+            player1Uid: m.player1Uid,
+            player2Uid: m.player2Uid,
+            player3Uid: m.player3Uid ?? null,
+            roomId: m.roomId,
+            status: m.status,
+        })),
+    });
+
+    io.to(`tournament_${tournamentId}`).emit('tournament:updated', publicTournamentState(t));
+}
+
+/** Xử lý khi 1 trận trong tournament kết thúc */
+async function handleMatchFinished(roomId, tournamentId, matchId, winnerUid) {
+    const t = tournaments.get(tournamentId);
+    if (!t) return;
+
+    const round = t.rounds[t.currentRound];
+    if (!round) return;
+    const match = round.find(m => m.matchId === matchId);
+    if (!match || match.status === 'finished') return;
+
+    match.status = 'finished';
+    match.winner = winnerUid;
+    console.log(`🏆 [Tournament] Match ${matchId} finished | winner: ${winnerUid}`);
+
+    io.to(`tournament_${tournamentId}`).emit('tournament:match_over', {
+        matchId, winner: winnerUid,
+        winnerName: t.players.find(p => p.uid === winnerUid)?.name ?? null,
+        tournamentId,
+    });
+
+    io.to(`tournament_${tournamentId}`).emit('tournament:updated', publicTournamentState(t));
+
+    // Dọn game state sau 15s
+    setTimeout(() => {
+        gameStates.delete(roomId);
+        const r = rooms.get(roomId);
+        if (r) { r.status = 'waiting'; }
+    }, 15000);
+
+    // Kiểm tra tất cả trận trong vòng đã xong chưa
+    const allDone = round.every(m => m.status === 'finished');
+    if (!allDone) return;
+
+    const winners = round.map(m => m.winner).filter(Boolean);
+    // Lọc unique (trường hợp bye có thể lặp)
+    const uniqueWinners = [...new Set(winners)];
+
+    io.to(`tournament_${tournamentId}`).emit('tournament:round_over', {
+        tournamentId, round: t.currentRound,
+    });
+
+    if (uniqueWinners.length <= 1) {
+        // Tournament kết thúc!
+        t.status = 'finished';
+        t.champion = uniqueWinners[0] ?? null;
+        const championName = t.players.find(p => p.uid === t.champion)?.name ?? null;
+        console.log(`🏆 [Tournament] Champion: ${championName}`);
+
+        io.to(`tournament_${tournamentId}`).emit('tournament:champion', {
+            tournamentId, champion: t.champion, championName,
+        });
+
+        // Thưởng xu cho nhà vô địch
+        if (t.champion) {
+            await rewardWinner(t.champion, t.players.length);
+        }
+        return;
+    }
+
+    // Tiếp tục vòng sau
+    t.currentRound++;
+    const nextPlayers = t.players.filter(p => uniqueWinners.includes(p.uid));
+    const nextMatches = createTournamentBracket(nextPlayers, []);
+    t.rounds.push(nextMatches);
+
+    console.log(`🏆 [Tournament] Advancing to round ${t.currentRound + 1} with ${nextPlayers.length} players`);
+
+    // Delay 5s cho người chơi xem kết quả
+    setTimeout(() => startTournamentRound(tournamentId), 5000);
+}
+
+// ─────────────────────────────────────────────
+// 8c. Tournament & Loạn Đấu Socket Events
+// ─────────────────────────────────────────────
+
+io.on('connection', (socket) => {
+    const { uid, name, photoURL } = socket.user;
+
+    // ─── Loạn Đấu Queue ──────────────────────────
+
+    socket.on('loandau:join_queue', () => {
+        let queue = loandauQueue.get(LOANDAU_QUEUE_ID);
+        if (!queue) {
+            queue = { hostUid: uid, players: [], createdAt: Date.now() };
+            loandauQueue.set(LOANDAU_QUEUE_ID, queue);
+        }
+        if (!queue.players.some(p => p.uid === uid)) {
+            queue.players.push({ uid, name, photoURL });
+        }
+        socket.join('loandau_queue');
+        io.to('loandau_queue').emit('loandau:queue_update', {
+            players: queue.players, count: queue.players.length, hostUid: queue.hostUid,
+        });
+        console.log(`📋 [Queue] ${name} joined Loạn Đấu queue (${queue.players.length} in queue)`);
+    });
+
+    socket.on('loandau:leave_queue', () => {
+        const queue = loandauQueue.get(LOANDAU_QUEUE_ID);
+        if (!queue) return;
+        queue.players = queue.players.filter(p => p.uid !== uid);
+        socket.leave('loandau_queue');
+        if (queue.players.length === 0) {
+            loandauQueue.delete(LOANDAU_QUEUE_ID);
+        } else {
+            if (queue.hostUid === uid) queue.hostUid = queue.players[0].uid;
+            io.to('loandau_queue').emit('loandau:queue_update', {
+                players: queue.players, count: queue.players.length, hostUid: queue.hostUid,
+            });
+        }
+    });
+
+    socket.on('loandau:start_split', () => {
+        const queue = loandauQueue.get(LOANDAU_QUEUE_ID);
+        if (!queue) return socket.emit('room:error', { message: 'Hàng chờ không tồn tại.' });
+        if (queue.hostUid !== uid) return socket.emit('room:error', { message: 'Chỉ người tổ chức mới có thể bắt đầu.' });
+        if (queue.players.length < 2) return socket.emit('room:error', { message: 'Cần ít nhất 2 người.' });
+
+        // Shuffle
+        const players = [...queue.players];
+        for (let i = players.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [players[i], players[j]] = [players[j], players[i]];
+        }
+
+        // Chia nhóm 5, nếu dư 1 → gộp vào nhóm áp chót
+        const groups = [];
+        for (let i = 0; i < players.length; i += 5) {
+            groups.push(players.slice(i, i + 5));
+        }
+        if (groups.length > 1 && groups[groups.length - 1].length === 1) {
+            const lone = groups.pop()[0];
+            groups[groups.length - 1].push(lone);
+        }
+
+        const createdRoomIds = [];
+        for (const group of groups) {
+            const host = group[0];
+            const room = createRoom(host.uid, host.name, host.photoURL,
+                `Loạn Đấu #${Date.now().toString(36).slice(-4).toUpperCase()}`,
+                { mode: 'loanDau', maxPlayers: group.length }
+            );
+            for (const p of group.slice(1)) {
+                room.players.push({ uid: p.uid, name: p.name, photoURL: p.photoURL, isReady: true, isHost: false });
+            }
+            createdRoomIds.push(room.id);
+
+            // Join socket cho từng player
+            for (const p of group) {
+                const s = socketByUid.get(p.uid);
+                if (s) {
+                    s.join(room.id);
+                    s.emit('room:joined', room);
+                    s.leave('loandau_queue');
+                }
+            }
+        }
+
+        loandauQueue.delete(LOANDAU_QUEUE_ID);
+        io.emit('rooms:list', getAllRooms());
+        console.log(`🎮 [Queue] Split into ${groups.length} rooms: ${createdRoomIds.join(', ')}`);
+    });
+
+    // ─── Tournament Events ────────────────────────
+
+    socket.on('tournament:create', ({ name: tName } = {}) => {
+        if (!tName?.trim()) return socket.emit('tournament:error', { message: 'Tên giải đấu không được để trống.' });
+        const tid = `tourn_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const t = {
+            id: tid, name: tName.trim(), hostUid: uid, status: 'lobby',
+            players: [{ uid, name, photoURL }],
+            rounds: [], currentRound: 0, champion: null,
+            acceptedPairs: [],
+            pendingChallenges: new Map(),
+        };
+        tournaments.set(tid, t);
+        socket.join(`tournament_${tid}`);
+        socket.emit('tournament:joined', publicTournamentState(t));
+        // Broadcast updated list
+        io.emit('tournament:list', getTournamentList());
+        console.log(`🏆 [Tournament] Created: "${tName}" by ${name}`);
+    });
+
+    socket.on('tournament:join', ({ tournamentId } = {}) => {
+        const t = tournaments.get(tournamentId);
+        if (!t) return socket.emit('tournament:error', { message: 'Giải đấu không tồn tại.' });
+        if (t.status !== 'lobby') return socket.emit('tournament:error', { message: 'Giải đấu đã bắt đầu.' });
+        if (t.players.some(p => p.uid === uid)) {
+            socket.join(`tournament_${tournamentId}`);
+            return socket.emit('tournament:joined', publicTournamentState(t));
+        }
+        t.players.push({ uid, name, photoURL });
+        socket.join(`tournament_${tournamentId}`);
+        socket.emit('tournament:joined', publicTournamentState(t));
+        io.to(`tournament_${tournamentId}`).emit('tournament:updated', publicTournamentState(t));
+        io.emit('tournament:list', getTournamentList());
+        console.log(`👤 [Tournament] ${name} joined "${t.name}"`);
+    });
+
+    socket.on('tournament:leave', ({ tournamentId } = {}) => {
+        const t = tournaments.get(tournamentId);
+        if (!t || t.status !== 'lobby') return;
+        t.players = t.players.filter(p => p.uid !== uid);
+        socket.leave(`tournament_${tournamentId}`);
+        if (t.players.length === 0) {
+            tournaments.delete(tournamentId);
+        } else {
+            if (t.hostUid === uid) t.hostUid = t.players[0].uid;
+            io.to(`tournament_${tournamentId}`).emit('tournament:updated', publicTournamentState(t));
+        }
+        io.emit('tournament:list', getTournamentList());
+    });
+
+    socket.on('tournament:challenge', ({ tournamentId, targetUid } = {}) => {
+        const t = tournaments.get(tournamentId);
+        if (!t || t.status !== 'lobby') return;
+
+        // Race condition: nếu target đã challenge mình → auto-accept
+        if (t.pendingChallenges.get(targetUid) === uid) {
+            t.pendingChallenges.delete(targetUid);
+            // Xóa challenge ngược lại nếu có
+            t.pendingChallenges.delete(uid);
+            // Kiểm tra chưa được ghép
+            const alreadyPaired = t.acceptedPairs.some(
+                ([a, b]) => a === uid || b === uid || a === targetUid || b === targetUid
+            );
+            if (!alreadyPaired) {
+                t.acceptedPairs.push([uid, targetUid]);
+                // Notify cả 2
+                const s1 = socketByUid.get(uid);
+                const s2 = socketByUid.get(targetUid);
+                s1?.emit('tournament:challenge_result', { targetUid, targetName: t.players.find(p => p.uid === targetUid)?.name, accepted: true });
+                s2?.emit('tournament:challenge_result', { targetUid: uid, targetName: name, accepted: true });
+                io.to(`tournament_${tournamentId}`).emit('tournament:updated', publicTournamentState(t));
+            }
+            return;
+        }
+
+        t.pendingChallenges.set(uid, targetUid);
+        // Notify target
+        const targetSocket = socketByUid.get(targetUid);
+        targetSocket?.emit('tournament:challenge_received', {
+            fromUid: uid, fromName: name, tournamentId,
+        });
+        io.to(`tournament_${tournamentId}`).emit('tournament:updated', publicTournamentState(t));
+    });
+
+    socket.on('tournament:challenge_respond', ({ tournamentId, challengerUid, accepted } = {}) => {
+        const t = tournaments.get(tournamentId);
+        if (!t || t.status !== 'lobby') return;
+
+        const pending = t.pendingChallenges.get(challengerUid);
+        if (pending !== uid) return; // không phải target của challenge này
+
+        t.pendingChallenges.delete(challengerUid);
+
+        const challengerSocket = socketByUid.get(challengerUid);
+        challengerSocket?.emit('tournament:challenge_result', {
+            targetUid: uid, targetName: name, accepted,
+        });
+
+        if (accepted) {
+            const alreadyPaired = t.acceptedPairs.some(
+                ([a, b]) => a === challengerUid || b === challengerUid || a === uid || b === uid
+            );
+            if (!alreadyPaired) {
+                t.acceptedPairs.push([challengerUid, uid]);
+            }
+        }
+        io.to(`tournament_${tournamentId}`).emit('tournament:updated', publicTournamentState(t));
+    });
+
+    socket.on('tournament:start', async ({ tournamentId } = {}) => {
+        const t = tournaments.get(tournamentId);
+        if (!t) return socket.emit('tournament:error', { message: 'Giải đấu không tồn tại.' });
+        if (t.hostUid !== uid) return socket.emit('tournament:error', { message: 'Chỉ người tổ chức mới có thể bắt đầu.' });
+        if (t.players.length < 2) return socket.emit('tournament:error', { message: 'Cần ít nhất 2 người.' });
+        if (t.status !== 'lobby') return;
+
+        t.status = 'round_active';
+        const round0 = createTournamentBracket(t.players, t.acceptedPairs);
+        t.rounds.push(round0);
+
+        await startTournamentRound(tournamentId);
+        io.emit('tournament:list', getTournamentList());
+    });
+
+    socket.on('tournament:spectate', ({ tournamentId, matchId } = {}) => {
+        const t = tournaments.get(tournamentId);
+        if (!t) return;
+        const match = t.rounds[t.currentRound]?.find(m => m.matchId === matchId);
+        if (!match || !match.roomId) return;
+
+        const specRoom = `spec_${match.roomId}`;
+        socket.join(specRoom);
+
+        const gs = gameStates.get(match.roomId);
+        if (gs) socket.emit('tournament:spectate_joined', { matchId, gameState: publicState(gs) });
+    });
+
+    socket.on('tournament:unspectate', ({ tournamentId, matchId } = {}) => {
+        const t = tournaments.get(tournamentId);
+        const match = t?.rounds[t.currentRound]?.find(m => m.matchId === matchId);
+        if (match?.roomId) socket.leave(`spec_${match.roomId}`);
+    });
+
+    socket.on('tournament:emoji', ({ tournamentId, matchId, emoji } = {}) => {
+        const t = tournaments.get(tournamentId);
+        const match = t?.rounds[t.currentRound]?.find(m => m.matchId === matchId);
+        if (!match?.roomId) return;
+        // Broadcast đến spectators của trận đó
+        io.to(`spec_${match.roomId}`).emit('tournament:emoji_broadcast', {
+            matchId, fromName: name, emoji,
+        });
+    });
+
+    // Lấy danh sách tournament đang mở
+    socket.on('tournament:list', () => {
+        socket.emit('tournament:list', getTournamentList());
+    });
+});
+
+function getTournamentList() {
+    return [...tournaments.values()]
+        .filter(t => t.status === 'lobby' || t.status === 'round_active')
+        .map(t => ({
+            id: t.id, name: t.name,
+            hostName: t.players.find(p => p.uid === t.hostUid)?.name ?? '',
+            playerCount: t.players.length,
+            status: t.status,
+        }));
+}
 
 // ─────────────────────────────────────────────
 // 9. Start
