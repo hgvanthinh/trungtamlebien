@@ -1,3 +1,4 @@
+// game-server/server.js
 import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
@@ -6,6 +7,33 @@ import cors from 'cors';
 import admin from 'firebase-admin';
 import os from 'os';
 
+import { 
+    initFirebaseService, 
+    deductEntryFees, 
+    refundSurvivors, 
+    rewardWinner 
+} from './firebaseService.js';
+
+import { 
+    MAP_H, MAP_W, CELL_WALL, CELL_EMPTY, CELL_BLOCK,
+    BOMB_TIMER, EXPLOSION_DUR, BOMB_RANGE, 
+    MOVE_COOLDOWN, ENTRY_COST, calcReward, GAME_DURATION_MS,
+    DIRS, LOANDAU_QUEUE_ID
+} from './constants.js';
+
+import {
+    rooms, gameStates, tournaments, socketByUid, loandauQueue,
+    buildRoomSummary, getAllRooms, createRoom, 
+    publicTournamentState, getTournamentList
+} from './stateManagers.js';
+
+import {
+    initGameState, calcExplosion, publicState
+} from './gameEngine.js';
+
+import {
+    createTournamentBracket, startTournamentRound
+} from './tournamentEngine.js';
 
 
 // ─────────────────────────────────────────────
@@ -19,8 +47,8 @@ const ALLOWED_ORIGINS = [
     'http://localhost:5173',
     /^http:\/\/192\.168\.\d+\.\d+:5173$/,   // bất kỳ IP 192.168.x.x
     /^http:\/\/10\.\d+\.\d+\.\d+:5173$/,    // bất kỳ IP 10.x.x.x
-    'https://toanthaybien.vn',       // Thêm dòng này
-    'https://www.toanthaybien.vn'    // Thêm cả có www cho chắc chắn
+    'https://toanthaybien.vn',       
+    'https://www.toanthaybien.vn'    
 ];
 
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
@@ -39,68 +67,25 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
 } else {
     // Local: đọc từ file (git-ignored)
-    const { readFileSync } = await import('fs');
-    serviceAccount = JSON.parse(
-        readFileSync(new URL('./serviceAccountKey.json', import.meta.url))
-    );
+    import('fs').then(({ readFileSync }) => {
+        serviceAccount = JSON.parse(
+            readFileSync(new URL('./serviceAccountKey.json', import.meta.url))
+        );
+        admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+        const db = admin.firestore();
+        initFirebaseService(db);
+        console.log('🔥 [Firebase Admin] Initialized successfully.');
+    });
 }
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-const db = admin.firestore();
-console.log('🔥 [Firebase Admin] Initialized successfully.');
-
-
-// ─────────────────────────────────────────────
-// 3. Game Constants
-// ─────────────────────────────────────────────
-const MAP_W = 29;          // must be odd — wider map with camera tracking
-const MAP_H = 13;          // must be odd
-const CELL_EMPTY = 0;
-const CELL_WALL = 1;      // indestructible
-const CELL_BLOCK = 2;      // destructible
-const BOMB_TIMER = 3000;  // ms
-const EXPLOSION_DUR = 700;   // ms
-const BOMB_RANGE = 3;
-const PLAYER_INIT_LIVES = 1;    // số mạng mặc định
-const MOVE_COOLDOWN = 130;   // ms/player
-const ENTRY_COST = 20;    // ← Xu mỗi người phải bỏ ra để chơi
-// Phần thưởng người thắng = số người × ENTRY_COST (toàn bộ pool).
-// Không có sàn cố định để tránh gian lận khi ít người chơi.
-/** Tính xu thưởng cho người thắng (toàn bộ pool không floor) */
-function calcReward(playerCount) { return playerCount * ENTRY_COST; }
+if(process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+     admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+     const db = admin.firestore();
+     initFirebaseService(db);
+     console.log('🔥 [Firebase Admin] Initialized successfully.');
+}
 
 // ─────────────────────────────────────────────
-// ←← CHỈNH THỜI GIAN GIỚI HẠN VÁN CHƠI TẠI ĐÂY →→
-// Mặc định: 5 phút (300 000 ms). Đổi số bên dưới để tăng/giảm.
-// Ví dụ: 3 phút = 180_000 | 10 phút = 600_000
-const GAME_DURATION_MS = 5 * 60 * 1000; // ← Sửa con số này (phút * 60 * 1000)
-
-const PLAYER_COLORS = [
-    '#4ade80', '#f87171', '#60a5fa', '#facc15',
-    '#c084fc', '#fb923c', '#34d399', '#f472b6',
-    '#a78bfa', '#38bdf8', '#fb7185', '#86efac',
-];
-
-// Spawn positions trải đều trên map rộng (safe zone 2 ô xung quanh)
-const SPAWN_POSITIONS = [
-    // 4 góc
-    [1, 1], [1, MAP_W - 2],
-    [MAP_H - 2, 1], [MAP_H - 2, MAP_W - 2],
-    // Giữa các cạnh trên/dưới
-    [1, Math.floor(MAP_W * 0.25)],
-    [1, Math.floor(MAP_W * 0.5)],
-    [1, Math.floor(MAP_W * 0.75)],
-    [MAP_H - 2, Math.floor(MAP_W * 0.25)],
-    [MAP_H - 2, Math.floor(MAP_W * 0.5)],
-    [MAP_H - 2, Math.floor(MAP_W * 0.75)],
-    // Cạnh trái/phải giữa
-    [Math.floor(MAP_H / 2), 1],
-    [Math.floor(MAP_H / 2), MAP_W - 2],
-];
-
-const DIRS = { up: [-1, 0], down: [1, 0], left: [0, -1], right: [0, 1] };
-
-// ─────────────────────────────────────────────
-// 4. Auth Middleware
+// 3. Auth Middleware
 // ─────────────────────────────────────────────
 io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token;
@@ -118,233 +103,10 @@ io.use(async (socket, next) => {
     }
 });
 
-// ─────────────────────────────────────────────
-// 5. Room Manager
-// ─────────────────────────────────────────────
-const rooms = new Map();        // roomId → RoomObject
-const gameStates = new Map();   // roomId → GameState
-const tournaments = new Map();  // tournamentId → TournamentObject
-const socketByUid = new Map();  // uid → socket (O(1) lookup)
-// Loạn Đấu queue (single global queue)
-const LOANDAU_QUEUE_ID = 'loandau_main';
-const loandauQueue = new Map(); // LOANDAU_QUEUE_ID → { hostUid, players, createdAt }
-
-function buildRoomSummary(room) {
-    return {
-        id: room.id, name: room.name, host: room.host,
-        playerCount: room.players.length, maxPlayers: room.maxPlayers,
-        status: room.status,
-    };
-}
-function getAllRooms() {
-    return [...rooms.values()].map(r => buildRoomSummary(r));
-}
-function createRoom(hostUid, hostName, hostPhotoURL, roomName, options = {}) {
-    const id = `room_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const room = {
-        id, name: roomName, host: hostUid,
-        players: [{ uid: hostUid, name: hostName, photoURL: hostPhotoURL, isReady: false, isHost: true }],
-        status: 'waiting',
-        mode: options.mode ?? 'loanDau',       // 'loanDau' | 'dauCap'
-        maxPlayers: options.maxPlayers ?? 5,   // Loạn Đấu default = 5
-        tournamentId: options.tournamentId ?? null,
-        matchId: options.matchId ?? null,
-        createdAt: Date.now(),
-    };
-    rooms.set(id, room);
-    return room;
-}
 
 // ─────────────────────────────────────────────
-// 6. Game Engine
+// 4. Game Engine helpers (explode)
 // ─────────────────────────────────────────────
-
-/** Generate a Bomberman-style map */
-function generateMap() {
-    const map = Array.from({ length: MAP_H }, (_, r) =>
-        Array.from({ length: MAP_W }, (_, c) => {
-            if (r === 0 || r === MAP_H - 1 || c === 0 || c === MAP_W - 1) return CELL_WALL;
-            if (r % 2 === 0 && c % 2 === 0) return CELL_WALL;
-            const isSafe = SPAWN_POSITIONS.some(([sr, sc]) =>
-                Math.abs(r - sr) + Math.abs(c - sc) <= 2
-            );
-            return isSafe ? CELL_EMPTY : (Math.random() < 0.45 ? CELL_BLOCK : CELL_EMPTY);
-        })
-    );
-    return map;
-}
-
-/** Cells hit by a bomb explosion */
-function calcExplosion(map, row, col, range) {
-    const cells = [{ row, col }];
-    for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-        for (let i = 1; i <= range; i++) {
-            const r = row + dr * i, c = col + dc * i;
-            if (r < 0 || r >= MAP_H || c < 0 || c >= MAP_W) break;
-            if (map[r][c] === CELL_WALL) break;          // wall: stop but don't include
-            cells.push({ row: r, col: c });
-            if (map[r][c] === CELL_BLOCK) break;          // block: include, then stop
-        }
-    }
-    return cells;
-}
-
-/** Deduct ENTRY_COST from all players, catch errors silently */
-async function deductEntryFees(players) {
-    console.log(`[Xu] deductEntryFees called for ${players.length} players: ${players.map(p => p.uid).join(', ')}`);
-    const promises = players.map(async (p) => {
-        try {
-            const ref = db.collection('users').doc(p.uid);
-            const snap = await ref.get();
-            if (!snap.exists) {
-                console.warn(`[Xu] User doc NOT FOUND for uid: ${p.uid}`);
-                return;
-            }
-            const before = snap.data()?.coins ?? 0;
-            const newCoins = Math.max(0, before - ENTRY_COST);
-            await ref.update({ coins: newCoins });
-            console.log(`[Xu] Deducted ${ENTRY_COST} from ${p.uid}: ${before} → ${newCoins}`);
-        } catch (e) {
-            console.error(`[Xu] FAILED deduct from ${p.uid}:`, e.message, e.code);
-        }
-    });
-    await Promise.all(promises);
-    console.log('[Xu] deductEntryFees done.');
-}
-
-/** Hoàn trả ENTRY_COST cho những người còn sống (dùng khi hết giờ mà hòa) */
-async function refundSurvivors(players, survivorUids) {
-    const set = new Set(survivorUids);
-    console.log(`[Xu] refundSurvivors: hoàn trả ${ENTRY_COST} Xu cho ${survivorUids.length} người sống`);
-    const promises = players.map(async (p) => {
-        try {
-            const ref = db.collection('users').doc(p.uid);
-            const snap = await ref.get();
-            if (!snap.exists) return;
-            const before = snap.data()?.coins ?? 0;
-            if (set.has(p.uid)) {
-                // Người còn sống: hoàn lại xu đã trừ trước đó
-                await ref.update({ coins: before + ENTRY_COST });
-                console.log(`[Xu] Hoàn trả ${ENTRY_COST} cho ${p.uid}: ${before} → ${before + ENTRY_COST}`);
-            } else {
-                // Người đã chết: không hoàn (xu đã hoàn toàn bị trừ từ deductEntryFees)
-                console.log(`[Xu] ${p.uid} đã bị loại - không hoàn xu`);
-            }
-        } catch (e) {
-            console.error(`[Xu] FAILED refund ${p.uid}:`, e.message);
-        }
-    });
-    await Promise.all(promises);
-    console.log('[Xu] refundSurvivors done.');
-}
-
-/** Award winner with playerCount * ENTRY_COST xu (no artificial floor) */
-async function rewardWinner(uid, playerCount) {
-    try {
-        const reward = calcReward(playerCount); // = playerCount × 20 Xu
-        console.log(`[Xu] rewardWinner uid=${uid} | playerCount=${playerCount} | reward=${reward}`);
-        const ref = db.collection('users').doc(uid);
-        const snap = await ref.get();
-        if (!snap.exists) {
-            console.warn(`[Xu] Winner doc NOT FOUND for uid: ${uid}`);
-            return;
-        }
-        const before = snap.data()?.coins ?? 0;
-        await ref.update({ coins: before + reward });
-        console.log(`[Xu] Awarded ${reward} to ${uid}: ${before} → ${before + reward}`);
-    } catch (e) {
-        console.error(`[Xu] FAILED reward uid ${uid}:`, e.message, e.code);
-    }
-}
-
-/** Ẩn items ngẫu nhiên dưới các ô gạch */
-function generateHiddenItems(blockPositions, playerCount, itemTypes) {
-    const hiddenItems = {};
-    let idx = 0;
-    for (const type of itemTypes) {
-        for (let k = 0; k < playerCount + 1 && idx < blockPositions.length; k++, idx++) {
-            const [r, c] = blockPositions[idx];
-            hiddenItems[`${r},${c}`] = type;
-        }
-    }
-    return hiddenItems;
-}
-
-/** Initialize game state for a room
- * @param {object} room
- * @param {object} [options]
- * @param {number} [options.durationMs]   - override game duration (default GAME_DURATION_MS)
- * @param {boolean} [options.noLifeItem]  - exclude 'life' items (Đấu Cặp mode)
- * @param {string} [options.tournamentId] - link to tournament
- * @param {string} [options.matchId]      - match ID within tournament
- */
-function initGameState(room, options = {}) {
-    const map = generateMap();
-    const playerCount = room.players.length;
-    const durationMs = options.durationMs ?? GAME_DURATION_MS;
-
-    // ── Ẩn vật phẩm ngẫu nhiên dưới các ô gạch ──
-    const blockPositions = [];
-    for (let r = 0; r < MAP_H; r++)
-        for (let c = 0; c < MAP_W; c++)
-            if (map[r][c] === CELL_BLOCK) blockPositions.push([r, c]);
-
-    // Fisher-Yates shuffle
-    for (let i = blockPositions.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [blockPositions[i], blockPositions[j]] = [blockPositions[j], blockPositions[i]];
-    }
-
-    // Đấu Cặp: không có item 'life', thêm 'star' thay thế
-    const itemTypes = options.noLifeItem
-        ? ['range', 'bomb', 'star']
-        : ['life', 'range', 'bomb'];
-    const hiddenItems = generateHiddenItems(blockPositions, playerCount, itemTypes);
-
-    const players = {};
-    room.players.forEach((p, i) => {
-        const [row, col] = SPAWN_POSITIONS[i % SPAWN_POSITIONS.length];
-        players[p.uid] = {
-            uid: p.uid, name: p.name, photoURL: p.photoURL || '',
-            color: PLAYER_COLORS[i % PLAYER_COLORS.length],
-            row, col, alive: true,
-            lives: PLAYER_INIT_LIVES,
-            bombRange: BOMB_RANGE,
-            maxBombs: 2,
-            lastMove: 0,
-            stars: 0,  // dùng trong chế độ Đấu Cặp
-        };
-    });
-    return {
-        map, players, bombs: [], explosions: [], items: [], hiddenItems,
-        status: 'playing', winner: null,
-        startedAt: Date.now(),
-        durationMs,
-        mode: room.mode ?? 'loanDau',
-        tournamentId: options.tournamentId ?? null,
-        matchId: options.matchId ?? null,
-    };
-}
-
-/** Public (serializable) game state sent to clients */
-function publicState(gs) {
-    const elapsed = Date.now() - (gs.startedAt ?? Date.now());
-    const remaining = Math.max(0, (gs.durationMs ?? GAME_DURATION_MS) - elapsed);
-    return {
-        map: gs.map,
-        players: gs.players,
-        bombs: gs.bombs.map(b => ({ id: b.id, row: b.row, col: b.col, ownerUid: b.ownerUid, expiresAt: b.expiresAt })),
-        explosions: gs.explosions,
-        items: gs.items,
-        timeRemaining: remaining,   // ms còn lại — client dùng để hiển thị đồng hồ
-        status: gs.status,
-        winner: gs.winner,
-        winnerName: gs.winner ? gs.players[gs.winner]?.name : null,
-        mode: gs.mode ?? 'loanDau',
-        tournamentId: gs.tournamentId ?? null,
-        matchId: gs.matchId ?? null,
-    };
-}
 
 /** Explode a bomb and handle chain reactions + player deaths */
 async function explodeBomb(roomId, bombId) {
@@ -455,19 +217,95 @@ function broadcastState(roomId) {
     io.to(`spec_${roomId}`).emit('game:state', state);
 }
 
+
 // ─────────────────────────────────────────────
-// 7. REST
+// 5. Tournament Helpers
+// ─────────────────────────────────────────────
+
+/** Xử lý khi 1 trận trong tournament kết thúc */
+async function handleMatchFinished(roomId, tournamentId, matchId, winnerUid) {
+    const t = tournaments.get(tournamentId);
+    if (!t) return;
+
+    const round = t.rounds[t.currentRound];
+    if (!round) return;
+    const match = round.find(m => m.matchId === matchId);
+    if (!match || match.status === 'finished') return;
+
+    match.status = 'finished';
+    match.winner = winnerUid;
+    console.log(`🏆 [Tournament] Match ${matchId} finished | winner: ${winnerUid}`);
+
+    io.to(`tournament_${tournamentId}`).emit('tournament:match_over', {
+        matchId, winner: winnerUid,
+        winnerName: t.players.find(p => p.uid === winnerUid)?.name ?? null,
+        tournamentId,
+    });
+
+    io.to(`tournament_${tournamentId}`).emit('tournament:updated', publicTournamentState(t));
+
+    // Dọn game state sau 15s
+    setTimeout(() => {
+        gameStates.delete(roomId);
+        const r = rooms.get(roomId);
+        if (r) { r.status = 'waiting'; }
+    }, 15000);
+
+    // Kiểm tra tất cả trận trong vòng đã xong chưa
+    const allDone = round.every(m => m.status === 'finished');
+    if (!allDone) return;
+
+    const winners = round.map(m => m.winner).filter(Boolean);
+    // Lọc unique (trường hợp bye có thể lặp)
+    const uniqueWinners = [...new Set(winners)];
+
+    io.to(`tournament_${tournamentId}`).emit('tournament:round_over', {
+        tournamentId, round: t.currentRound,
+    });
+
+    if (uniqueWinners.length <= 1) {
+        // Tournament kết thúc!
+        t.status = 'finished';
+        t.champion = uniqueWinners[0] ?? null;
+        const championName = t.players.find(p => p.uid === t.champion)?.name ?? null;
+        console.log(`🏆 [Tournament] Champion: ${championName}`);
+
+        io.to(`tournament_${tournamentId}`).emit('tournament:champion', {
+            tournamentId, champion: t.champion, championName,
+        });
+
+        // Thưởng xu cho nhà vô địch
+        if (t.champion) {
+            await rewardWinner(t.champion, t.players.length);
+        }
+        return;
+    }
+
+    // Tiếp tục vòng sau
+    t.currentRound++;
+    const nextPlayers = t.players.filter(p => uniqueWinners.includes(p.uid));
+    const nextMatches = createTournamentBracket(nextPlayers, []);
+    t.rounds.push(nextMatches);
+
+    console.log(`🏆 [Tournament] Advancing to round ${t.currentRound + 1} with ${nextPlayers.length} players`);
+
+    // Delay 5s cho người chơi xem kết quả
+    setTimeout(() => startTournamentRound(tournamentId, io), 5000); // Pass io down
+}
+
+
+// ─────────────────────────────────────────────
+// 6. REST Routes
 // ─────────────────────────────────────────────
 app.get('/', (req, res) => res.json({ status: 'ok', message: '🎮 Game Server running' }));
 app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime(), rooms: rooms.size }));
 
-// Test endpoint: ghi thẳng vào Firestore để xác nhận Admin SDK có hoạt động
-// GET /test-xu?uid=<firebase_uid>
 app.get('/test-xu', async (req, res) => {
     const { uid } = req.query;
     if (!uid) return res.status(400).json({ error: 'Missing ?uid=...' });
     try {
-        const ref = db.collection('users').doc(uid);
+        const adminDb = admin.firestore();
+        const ref = adminDb.collection('users').doc(uid);
         const snap = await ref.get();
         if (!snap.exists) return res.status(404).json({ error: 'User not found', uid });
         const before = snap.data()?.coins ?? 0;
@@ -478,8 +316,9 @@ app.get('/test-xu', async (req, res) => {
     }
 });
 
+
 // ─────────────────────────────────────────────
-// 8. Socket Events
+// 7. Socket Events
 // ─────────────────────────────────────────────
 io.on('connection', (socket) => {
     const { uid, name, email, photoURL } = socket.user;
@@ -559,7 +398,6 @@ io.on('connection', (socket) => {
         console.log(`🚀 [Game] Started in "${room.name}" (${room.players.length} players)`);
 
         // ── Bộ đếm thời gian tối đa (GAME_DURATION_MS) ──
-        // Khi hết giờ: người còn nhiều mạng nhất thắng. Nếu bằng nhau → hòa.
         const gameTimer = setTimeout(async () => {
             const gs2 = gameStates.get(roomId);
             if (!gs2 || gs2.status !== 'playing') return;
@@ -880,251 +718,8 @@ io.on('connection', (socket) => {
             io.emit('rooms:list', getAllRooms());
         }
     });
-});
 
-// ─────────────────────────────────────────────
-// 8b. Tournament Engine
-// ─────────────────────────────────────────────
-
-/** Serialize tournament state for clients */
-function publicTournamentState(t) {
-    return {
-        id: t.id, name: t.name, hostUid: t.hostUid, status: t.status,
-        players: t.players,
-        rounds: t.rounds.map(round =>
-            round.map(m => ({
-                matchId: m.matchId,
-                player1Uid: m.player1Uid,
-                player2Uid: m.player2Uid,
-                player3Uid: m.player3Uid ?? null,
-                roomId: m.roomId,
-                status: m.status,
-                winner: m.winner,
-            }))
-        ),
-        currentRound: t.currentRound,
-        champion: t.champion,
-        pendingChallenges: [...(t.pendingChallenges?.entries() ?? [])].map(
-            ([challengerUid, targetUid]) => ({ challengerUid, targetUid })
-        ),
-        acceptedPairs: t.acceptedPairs ?? [],
-    };
-}
-
-/** Tạo bracket từ danh sách người chơi + các cặp đã chấp nhận */
-function createTournamentBracket(players, acceptedPairs = []) {
-    const matches = [];
-    const paired = new Set();
-
-    // Ưu tiên cặp đã thách đấu
-    for (const [uid1, uid2] of acceptedPairs) {
-        if (!paired.has(uid1) && !paired.has(uid2)) {
-            const p1 = players.find(p => p.uid === uid1);
-            const p2 = players.find(p => p.uid === uid2);
-            if (p1 && p2) {
-                matches.push({
-                    matchId: `match_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
-                    player1Uid: uid1, player2Uid: uid2, player3Uid: null,
-                    roomId: null, status: 'pending', winner: null,
-                });
-                paired.add(uid1);
-                paired.add(uid2);
-            }
-        }
-    }
-
-    // Ghép random phần còn lại
-    const remaining = players.filter(p => !paired.has(p.uid));
-    // Fisher-Yates shuffle
-    for (let i = remaining.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
-    }
-
-    for (let i = 0; i < remaining.length; i += 2) {
-        if (i + 1 < remaining.length) {
-            matches.push({
-                matchId: `match_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
-                player1Uid: remaining[i].uid, player2Uid: remaining[i + 1].uid, player3Uid: null,
-                roomId: null, status: 'pending', winner: null,
-            });
-        } else {
-            // Số lẻ: ghép 3 người vào cặp trận cuối
-            if (matches.length > 0) {
-                matches[matches.length - 1].player3Uid = remaining[i].uid;
-            } else {
-                // Chỉ có 1 người duy nhất → bye (thắng luôn)
-                matches.push({
-                    matchId: `match_${Date.now()}_bye`,
-                    player1Uid: remaining[i].uid, player2Uid: null, player3Uid: null,
-                    roomId: null, status: 'finished', winner: remaining[i].uid,
-                });
-            }
-        }
-    }
-
-    return matches;
-}
-
-/** Bắt đầu một vòng tournament */
-async function startTournamentRound(tournamentId) {
-    const t = tournaments.get(tournamentId);
-    if (!t) return;
-
-    const round = t.rounds[t.currentRound];
-    console.log(`🏆 [Tournament] Starting round ${t.currentRound + 1} for "${t.name}" (${round.length} matches)`);
-
-    for (let i = 0; i < round.length; i++) {
-        const match = round[i];
-        if (match.status === 'finished') continue; // bye match
-
-        // Gom danh sách player cho trận này
-        const matchPlayerUids = [match.player1Uid, match.player2Uid, match.player3Uid].filter(Boolean);
-        const matchPlayers = matchPlayerUids.map(uid => t.players.find(p => p.uid === uid)).filter(Boolean);
-
-        // Tạo room riêng cho trận
-        const hostPlayer = matchPlayers[0];
-        const matchRoom = createRoom(
-            hostPlayer.uid, hostPlayer.name, hostPlayer.photoURL,
-            `[Đấu Cặp] Vòng ${t.currentRound + 1} - Trận ${i + 1}`,
-            {
-                mode: 'dauCap',
-                maxPlayers: matchPlayers.length,
-                tournamentId,
-                matchId: match.matchId,
-            }
-        );
-
-        // Thêm các player vào room (host đã có, thêm phần còn lại)
-        for (const p of matchPlayers.slice(1)) {
-            matchRoom.players.push({ uid: p.uid, name: p.name, photoURL: p.photoURL, isReady: true, isHost: false });
-        }
-        matchRoom.players[0].isReady = true;
-        matchRoom.status = 'playing';
-
-        // Init game state (Đấu Cặp: 90s, không có life item)
-        const gs = initGameState(matchRoom, {
-            durationMs: 90_000,
-            noLifeItem: true,
-            tournamentId,
-            matchId: match.matchId,
-        });
-        gameStates.set(matchRoom.id, gs);
-
-        match.roomId = matchRoom.id;
-        match.status = 'playing';
-
-        // Join socket rooms + notify players
-        for (const p of matchPlayers) {
-            const s = socketByUid.get(p.uid);
-            if (s) {
-                s.join(matchRoom.id);
-                s.emit('tournament:match_start', {
-                    matchId: match.matchId,
-                    roomId: matchRoom.id,
-                    tournamentId,
-                    opponentName: matchPlayers.filter(x => x.uid !== p.uid).map(x => x.name).join(' & '),
-                });
-                s.emit('game:start', { roomId: matchRoom.id, gameState: publicState(gs) });
-            }
-        }
-    }
-
-    io.to(`tournament_${tournamentId}`).emit('tournament:round_start', {
-        tournamentId,
-        round: t.currentRound,
-        matches: round.map(m => ({
-            matchId: m.matchId,
-            player1Uid: m.player1Uid,
-            player2Uid: m.player2Uid,
-            player3Uid: m.player3Uid ?? null,
-            roomId: m.roomId,
-            status: m.status,
-        })),
-    });
-
-    io.to(`tournament_${tournamentId}`).emit('tournament:updated', publicTournamentState(t));
-}
-
-/** Xử lý khi 1 trận trong tournament kết thúc */
-async function handleMatchFinished(roomId, tournamentId, matchId, winnerUid) {
-    const t = tournaments.get(tournamentId);
-    if (!t) return;
-
-    const round = t.rounds[t.currentRound];
-    if (!round) return;
-    const match = round.find(m => m.matchId === matchId);
-    if (!match || match.status === 'finished') return;
-
-    match.status = 'finished';
-    match.winner = winnerUid;
-    console.log(`🏆 [Tournament] Match ${matchId} finished | winner: ${winnerUid}`);
-
-    io.to(`tournament_${tournamentId}`).emit('tournament:match_over', {
-        matchId, winner: winnerUid,
-        winnerName: t.players.find(p => p.uid === winnerUid)?.name ?? null,
-        tournamentId,
-    });
-
-    io.to(`tournament_${tournamentId}`).emit('tournament:updated', publicTournamentState(t));
-
-    // Dọn game state sau 15s
-    setTimeout(() => {
-        gameStates.delete(roomId);
-        const r = rooms.get(roomId);
-        if (r) { r.status = 'waiting'; }
-    }, 15000);
-
-    // Kiểm tra tất cả trận trong vòng đã xong chưa
-    const allDone = round.every(m => m.status === 'finished');
-    if (!allDone) return;
-
-    const winners = round.map(m => m.winner).filter(Boolean);
-    // Lọc unique (trường hợp bye có thể lặp)
-    const uniqueWinners = [...new Set(winners)];
-
-    io.to(`tournament_${tournamentId}`).emit('tournament:round_over', {
-        tournamentId, round: t.currentRound,
-    });
-
-    if (uniqueWinners.length <= 1) {
-        // Tournament kết thúc!
-        t.status = 'finished';
-        t.champion = uniqueWinners[0] ?? null;
-        const championName = t.players.find(p => p.uid === t.champion)?.name ?? null;
-        console.log(`🏆 [Tournament] Champion: ${championName}`);
-
-        io.to(`tournament_${tournamentId}`).emit('tournament:champion', {
-            tournamentId, champion: t.champion, championName,
-        });
-
-        // Thưởng xu cho nhà vô địch
-        if (t.champion) {
-            await rewardWinner(t.champion, t.players.length);
-        }
-        return;
-    }
-
-    // Tiếp tục vòng sau
-    t.currentRound++;
-    const nextPlayers = t.players.filter(p => uniqueWinners.includes(p.uid));
-    const nextMatches = createTournamentBracket(nextPlayers, []);
-    t.rounds.push(nextMatches);
-
-    console.log(`🏆 [Tournament] Advancing to round ${t.currentRound + 1} with ${nextPlayers.length} players`);
-
-    // Delay 5s cho người chơi xem kết quả
-    setTimeout(() => startTournamentRound(tournamentId), 5000);
-}
-
-// ─────────────────────────────────────────────
-// 8c. Tournament & Loạn Đấu Socket Events
-// ─────────────────────────────────────────────
-
-io.on('connection', (socket) => {
-    const { uid, name, photoURL } = socket.user;
-
-    // ─── Loạn Đấu Queue ──────────────────────────
+    // ─── Loạt Đấu Queue ──────────────────────────
 
     socket.on('loandau:join_queue', () => {
         let queue = loandauQueue.get(LOANDAU_QUEUE_ID);
@@ -1328,7 +923,7 @@ io.on('connection', (socket) => {
         const round0 = createTournamentBracket(t.players, t.acceptedPairs);
         t.rounds.push(round0);
 
-        await startTournamentRound(tournamentId);
+        await startTournamentRound(tournamentId, io); // Pass io down
         io.emit('tournament:list', getTournamentList());
     });
 
@@ -1367,19 +962,9 @@ io.on('connection', (socket) => {
     });
 });
 
-function getTournamentList() {
-    return [...tournaments.values()]
-        .filter(t => t.status === 'lobby' || t.status === 'round_active')
-        .map(t => ({
-            id: t.id, name: t.name,
-            hostName: t.players.find(p => p.uid === t.hostUid)?.name ?? '',
-            playerCount: t.players.length,
-            status: t.status,
-        }));
-}
 
 // ─────────────────────────────────────────────
-// 9. Start
+// 8. Start
 // ─────────────────────────────────────────────
 
 /** Lấy địa chỉ IPv4 LAN đầu tiên (bỏ qua loopback) */

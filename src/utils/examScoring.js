@@ -49,15 +49,20 @@ export function calculateDynamicPoints(questionCounts, customBudgets = {}) {
 
 /**
  * Get the max possible score for a given set of question types
+ * Reads the budget saved on each questionType (set by teacher at creation time)
+ * Falls back to default 3-4-3 for backward compatibility with old exams
  * @param {Object} questionTypes - exam.questionTypes object
  * @returns {number} Max score
  */
 export function getMaxScore(questionTypes = {}) {
-  const sectionBudgets = { abcd: 3, trueFalse: 4, shortAnswer: 3 };
+  const defaultBudgets = { abcd: 3, trueFalse: 4, shortAnswer: 3 };
   let max = 0;
-  if (questionTypes.abcd?.enabled) max += sectionBudgets.abcd;
-  if (questionTypes.trueFalse?.enabled) max += sectionBudgets.trueFalse;
-  if (questionTypes.shortAnswer?.enabled) max += sectionBudgets.shortAnswer;
+  if (questionTypes.abcd?.enabled)
+    max += questionTypes.abcd.budget ?? defaultBudgets.abcd;
+  if (questionTypes.trueFalse?.enabled)
+    max += questionTypes.trueFalse.budget ?? defaultBudgets.trueFalse;
+  if (questionTypes.shortAnswer?.enabled)
+    max += questionTypes.shortAnswer.budget ?? defaultBudgets.shortAnswer;
   return max;
 }
 

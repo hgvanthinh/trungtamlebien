@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { createMixedExam } from '../../services/examBankService';
+import { createMixedExam, updateMixedExam } from '../../services/examBankService';
 import { processFileForExam, estimateProcessingTime } from '../../services/fileProcessingService';
 import { calculateDynamicPoints, validateQuestionCounts, formatPoints } from '../../utils/examScoring';
 import Button from '../common/Button';
@@ -9,24 +9,26 @@ import AbcdGridInput from './AbcdGridInput';
 import TrueFalseGridInput from './TrueFalseGridInput';
 import ShortAnswerGridInput from './ShortAnswerGridInput';
 
-const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
-  const [title, setTitle] = useState('');
+const ExamMixedModal = ({ currentUser, onClose, onComplete, editingExam }) => {
+  const isEditing = !!editingExam;
+
+  const [title, setTitle] = useState(editingExam?.title || '');
   const [file, setFile] = useState(null);
 
   // ABCD Multiple Choice - now using grid format { 1: 'A', 2: 'B', ... }
-  const [abcdAnswers, setAbcdAnswers] = useState({});
+  const [abcdAnswers, setAbcdAnswers] = useState(editingExam?.answerKey?.abcd || {});
 
   // True/False - { 1: { a: true, b: false, c: true, d: false }, ... }
-  const [trueFalseQuestions, setTrueFalseQuestions] = useState({});
+  const [trueFalseQuestions, setTrueFalseQuestions] = useState(editingExam?.answerKey?.trueFalse || {});
 
   // Short Answer - { 1: ['answer1', 'answer2'], 2: ['answer'], ... }
-  const [shortAnswerQuestions, setShortAnswerQuestions] = useState({});
+  const [shortAnswerQuestions, setShortAnswerQuestions] = useState(editingExam?.answerKey?.shortAnswer || {});
 
-  // Section budgets (điểm từng phần, GV tự nhập)
+  // Section budgets — đọc từ đề cũ nếu đang sửa, mặc định 3-4-3
   const [sectionBudgets, setSectionBudgets] = useState({
-    abcd: 3,
-    trueFalse: 4,
-    shortAnswer: 3,
+    abcd: editingExam?.questionTypes?.abcd?.budget ?? 3,
+    trueFalse: editingExam?.questionTypes?.trueFalse?.budget ?? 4,
+    shortAnswer: editingExam?.questionTypes?.shortAnswer?.budget ?? 3,
   });
 
   const handleBudgetChange = (section, value) => {
@@ -38,7 +40,7 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
   };
 
   // Settings
-  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [caseSensitive, setCaseSensitive] = useState(editingExam?.shortAnswerSettings?.caseSensitive || false);
 
   // UI State
   const [expandedSections, setExpandedSections] = useState({
@@ -48,6 +50,7 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
   });
   const [processing, setProcessing] = useState(false);
   const [uploading, setUploading] = useState(false);
+
   const [processProgress, setProcessProgress] = useState(null);
   const [error, setError] = useState('');
 
@@ -112,7 +115,8 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
       return false;
     }
 
-    if (!file) {
+    // Khi tạo mới bắt buộc chọn file; khi sửa có thể giữ file cũ
+    if (!isEditing && !file) {
       setError('Vui lòng chọn file đề thi');
       return false;
     }
@@ -147,85 +151,128 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
       return;
     }
 
+    // Build answer key & question types config (dùng chung cho create và update)
+    const answerKey = {
+      abcd: abcdAnswers,
+      trueFalse: trueFalseQuestions,
+      shortAnswer: shortAnswerQuestions
+    };
+
+    const questionTypes = {
+      abcd: { count: questionCounts.abcd, budget: sectionBudgets.abcd },
+      trueFalse: { count: questionCounts.trueFalse, budget: sectionBudgets.trueFalse },
+      shortAnswer: { count: questionCounts.shortAnswer, budget: sectionBudgets.shortAnswer },
+    };
+
+    const settings = {
+      caseSensitive,
+      trimWhitespace: true,
+      normalizeSpaces: true
+    };
+
     try {
-      // Step 1: Process file
-      setProcessing(true);
-      const estimatedTime = estimateProcessingTime(file);
+      let result;
 
-      setProcessProgress({
-        stage: 'preparing',
-        progress: 0,
-        estimatedTime,
-      });
+      if (isEditing) {
+        // ===== CHẾ ĐỘ SỬA =====
+        setUploading(true);
+        setProcessProgress({ stage: 'uploading', progress: 0 });
 
-      const processedResult = await processFileForExam(file, (progress) => {
-        setProcessProgress({
-          ...progress,
-          estimatedTime,
-        });
-      });
+        // Nếu GV chọn file mới → xử lý và upload; không thì giữ file cũ
+        let processedFile = null;
+        let metadata = {};
+        if (file) {
+          setProcessing(true);
+          const estimatedTime = estimateProcessingTime(file);
+          setProcessProgress({ stage: 'preparing', progress: 0, estimatedTime });
+          const processedResult = await processFileForExam(file, (progress) => {
+            setProcessProgress({ ...progress, estimatedTime });
+          });
+          setProcessing(false);
+          setProcessProgress({ stage: 'uploading', progress: 0 });
+          processedFile = processedResult.file;
+          metadata = {
+            originalSize: processedResult.originalSize,
+            processedSize: processedResult.processedSize,
+            compressionRatio: processedResult.compressionRatio,
+            converted: processedResult.converted || false,
+            originalType: processedResult.originalType,
+          };
+        }
 
-      // Step 2: Create exam
-      setProcessing(false);
-      setUploading(true);
-      setProcessProgress({
-        stage: 'uploading',
-        progress: 0,
-      });
+        result = await updateMixedExam(
+          editingExam.id,
+          processedFile,
+          metadata,
+          questionTypes,
+          answerKey,
+          settings
+        );
 
-      // Build answer key
-      const answerKey = {
-        abcd: abcdAnswers,
-        trueFalse: trueFalseQuestions,
-        shortAnswer: shortAnswerQuestions
-      };
+        // updateMixedExam không cập nhật title → update riêng nếu cần
+        if (result.success && title !== editingExam.title) {
+          const { updateExam } = await import('../../services/examBankService');
+          await updateExam(editingExam.id, { title });
+        }
 
-      // Build question types config
-      const questionTypes = {
-        abcd: { count: questionCounts.abcd, budget: sectionBudgets.abcd },
-        trueFalse: { count: questionCounts.trueFalse, budget: sectionBudgets.trueFalse },
-        shortAnswer: { count: questionCounts.shortAnswer, budget: sectionBudgets.shortAnswer },
-      };
+        setUploading(false);
+        setProcessProgress(null);
 
-      // Settings
-      const settings = {
-        caseSensitive,
-        trimWhitespace: true,
-        normalizeSpaces: true
-      };
-
-      const result = await createMixedExam(
-        processedResult.file,
-        title,
-        currentUser.uid,
-        {
-          originalSize: processedResult.originalSize,
-          processedSize: processedResult.processedSize,
-          compressionRatio: processedResult.compressionRatio,
-          converted: processedResult.converted || false,
-          originalType: processedResult.originalType,
-        },
-        questionTypes,
-        answerKey,
-        settings
-      );
-
-      setUploading(false);
-      setProcessProgress(null);
-
-      if (result.success) {
-        onComplete({
-          ...result,
-          message: `Tạo đề trắc nghiệm thành công! ${totalQuestions} câu (${questionCounts.abcd} ABCD + ${questionCounts.trueFalse} Đ/S + ${questionCounts.shortAnswer} TLN).`,
-        });
+        if (result.success) {
+          onComplete({
+            ...result,
+            message: `Đã cập nhật đề trắc nghiệm! ${totalQuestions} câu (${questionCounts.abcd} ABCD + ${questionCounts.trueFalse} Đ/S + ${questionCounts.shortAnswer} TLN).`,
+          });
+        } else {
+          setError('Cập nhật thất bại: ' + result.error);
+        }
       } else {
-        setError('Tạo đề thất bại: ' + result.error);
+        // ===== CHẾ ĐỘ TẠO MỚI =====
+        setProcessing(true);
+        const estimatedTime = estimateProcessingTime(file);
+        setProcessProgress({ stage: 'preparing', progress: 0, estimatedTime });
+
+        const processedResult = await processFileForExam(file, (progress) => {
+          setProcessProgress({ ...progress, estimatedTime });
+        });
+
+        setProcessing(false);
+        setUploading(true);
+        setProcessProgress({ stage: 'uploading', progress: 0 });
+
+        result = await createMixedExam(
+          processedResult.file,
+          title,
+          currentUser.uid,
+          {
+            originalSize: processedResult.originalSize,
+            processedSize: processedResult.processedSize,
+            compressionRatio: processedResult.compressionRatio,
+            converted: processedResult.converted || false,
+            originalType: processedResult.originalType,
+          },
+          questionTypes,
+          answerKey,
+          settings
+        );
+
+        setUploading(false);
+        setProcessProgress(null);
+
+        if (result.success) {
+          onComplete({
+            ...result,
+            message: `Tạo đề trắc nghiệm thành công! ${totalQuestions} câu (${questionCounts.abcd} ABCD + ${questionCounts.trueFalse} Đ/S + ${questionCounts.shortAnswer} TLN).`,
+          });
+        } else {
+          setError('Tạo đề thất bại: ' + result.error);
+        }
       }
-    } catch (error) {
+    } catch (err) {
       setProcessing(false);
       setUploading(false);
       setProcessProgress(null);
-      setError('Lỗi: ' + error.message);
+      setError('Lỗi: ' + err.message);
     }
   };
 
@@ -242,7 +289,7 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
         {/* Header */}
         <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-xl font-bold text-[#111812] dark:text-white">
-            Tạo đề trắc nghiệm
+            {isEditing ? 'Sửa đề trắc nghiệm' : 'Tạo đề trắc nghiệm'}
           </h2>
           <button
             onClick={onClose}
@@ -287,7 +334,11 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
               {/* File Upload */}
               <div>
                 <label className="block text-sm font-medium mb-2 text-[#111812] dark:text-white">
-                  File đề thi <span className="text-red-500">*</span>
+                  File đề thi
+                  {isEditing
+                    ? <span className="text-gray-400 ml-1">(Tùy chọn - để trống nếu không đổi file)</span>
+                    : <span className="text-red-500">*</span>
+                  }
                 </label>
                 <input
                   type="file"
@@ -308,6 +359,11 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
                         <p className="text-xs text-gray-500">
                           {(file.size / 1024 / 1024).toFixed(2)} MB
                         </p>
+                      </>
+                    ) : isEditing && editingExam?.fileName ? (
+                      <>
+                        <p className="font-medium text-[#111812] dark:text-white">{editingExam.fileName}</p>
+                        <p className="text-xs text-green-600">File hiện tại — click để thay bằng file mới</p>
                       </>
                     ) : (
                       <>
@@ -500,11 +556,11 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete }) => {
             <Button
               variant="primary"
               onClick={handleCreate}
-              disabled={!file || !title.trim() || totalQuestions === 0 || !validation.valid}
+              disabled={(!isEditing && !file) || !title.trim() || totalQuestions === 0 || !validation.valid}
               className="flex-1"
             >
-              <Icon name="add_circle" className="mr-2" />
-              Tạo đề ({totalQuestions} câu - {formatPoints(dynamicPoints.total)}đ)
+              <Icon name={isEditing ? 'save' : 'add_circle'} className="mr-2" />
+              {isEditing ? 'Lưu thay đổi' : 'Tạo đề'} ({totalQuestions} câu - {formatPoints(dynamicPoints.total)}đ)
             </Button>
           </div>
         )}

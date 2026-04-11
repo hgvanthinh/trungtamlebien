@@ -81,7 +81,7 @@ const ExamCard = ({
         <div className="mb-3">
           <div className="flex items-center gap-1 mb-2 text-xs font-bold text-[#111812] dark:text-white">
             <Icon name="ballot" className="text-primary text-sm" />
-            {exam.totalQuestions} câu - 10 điểm
+            {exam.totalQuestions} câu - {exam.totalPoints ?? 10} điểm
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
             {exam.questionTypes.abcd?.enabled && (
