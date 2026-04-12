@@ -27,7 +27,7 @@ export function useTeachingHandlers({ students, selectedClassId, classes, fetchS
 
     // Sort state
     const [showSortMenu, setShowSortMenu] = useState(false);
-    const [sortBy, setSortBy] = useState('points');
+    const [sortBy, setSortBy] = useState('name');
 
     // Color state
     const [studentColors, setStudentColors] = useState({});

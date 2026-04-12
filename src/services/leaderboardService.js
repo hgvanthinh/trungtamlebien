@@ -2,63 +2,58 @@
 import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
-// Cache leaderboard data (5 phút)
-let leaderboardCache = null;
-let cacheTimestamp = null;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+// Cache classes map (classId -> grade)
+let classesGradeMap = null;
 
-/**
- * Lấy thông tin lớp học của học sinh để xác định khối
- * (Deprecated - kept for backward compatibility)
- */
-const getStudentGrade = async (classIds) => {
-  if (!classIds || classIds.length === 0) return null;
-
-  try {
-    // Lấy tất cả classes song song để tăng tốc
-    const classPromises = classIds.map(async (classId) => {
-      const classRef = doc(db, 'classes', classId);
-      const classDoc = await getDoc(classRef);
-      if (classDoc.exists()) {
-        return parseInt(classDoc.data().grade) || 0;
-      }
-      return 0;
-    });
-
-    const grades = await Promise.all(classPromises);
-    return Math.max(...grades);
-  } catch (error) {
-    // Nếu không có quyền đọc classes, trả về null (silent fail - đây là expected behavior)
-    return null;
-  }
+export const seedClassesGradeMap = (classList) => {
+  classesGradeMap = {};
+  classList.forEach(c => {
+    classesGradeMap[c.id] = parseInt(c.grade) || 0;
+  });
 };
+
+const fetchClassesGradeMap = async (seedClasses = null) => {
+  if (seedClasses && seedClasses.length > 0 && !classesGradeMap) {
+    classesGradeMap = {};
+    seedClasses.forEach(c => {
+      classesGradeMap[c.id] = parseInt(c.grade) || 0;
+    });
+  }
+  if (classesGradeMap) return classesGradeMap;
+  try {
+    const classesSnapshot = await getDocs(collection(db, 'classes'));
+    classesGradeMap = {};
+    classesSnapshot.docs.forEach(d => {
+      const data = d.data();
+      classesGradeMap[d.id] = parseInt(data.grade) || 0;
+    });
+  } catch {
+    classesGradeMap = {};
+  }
+  return classesGradeMap;
+};
+
 
 /**
  * Fetch all students once - OPTIMIZED version
  * Lấy tất cả học sinh 1 lần duy nhất, cache kết quả
  */
-const fetchAllStudentsOptimized = async (forceRefresh = false) => {
-  // Check cache
-  if (!forceRefresh && leaderboardCache && cacheTimestamp) {
-    const cacheAge = Date.now() - cacheTimestamp;
-    if (cacheAge < CACHE_DURATION) {
-      return leaderboardCache;
-    }
-  }
+const fetchAllStudentsOptimized = async (_forceRefresh = false, seedClasses = null) => {
 
   try {
     const usersRef = collection(db, 'users');
     const studentsQuery = query(usersRef, where('role', '==', 'student'));
     const studentsSnapshot = await getDocs(studentsQuery);
 
-    const students = await Promise.all(studentsSnapshot.docs.map(async (docSnapshot) => {
-      const userData = docSnapshot.data();
+    const gradeMap = await fetchClassesGradeMap(seedClasses);
 
-      // Lấy grade từ classes nếu chưa có denormalized field
-      let grade = userData.gradeLevel || 0;
-      if (!grade && userData.classes && userData.classes.length > 0) {
-        grade = await getStudentGrade(userData.classes);
-      }
+
+    const students = studentsSnapshot.docs.map((docSnapshot) => {
+      const userData = docSnapshot.data();
+      const userClasses = userData.classes || [];
+
+      // Lấy grade từ classesGradeMap dựa trên class đầu tiên của học sinh
+      const grade = userClasses.length > 0 ? (gradeMap[userClasses[0]] || 0) : 0;
 
       return {
         uid: docSnapshot.id,
@@ -67,14 +62,10 @@ const fetchAllStudentsOptimized = async (forceRefresh = false) => {
         avatar: userData.avatar,
         totalBehaviorPoints: userData.totalBehaviorPoints || 0,
         coins: userData.coins || 0,
-        grade: grade,
-        classes: userData.classes || [],
+        grade,
+        classes: userClasses,
       };
-    }));
-
-    // Update cache
-    leaderboardCache = students;
-    cacheTimestamp = Date.now();
+    });
 
     return students;
   } catch (error) {
@@ -142,10 +133,10 @@ export const getClassLeaderboard = async (classId, forceRefresh = false) => {
 /**
  * Lấy bảng xếp hạng theo khối - OPTIMIZED
  */
-export const getGradeLeaderboard = async (grade, forceRefresh = false) => {
+export const getGradeLeaderboard = async (grade, forceRefresh = false, seedClasses = null) => {
   try {
     // Fetch all students từ cache
-    const allStudents = await fetchAllStudentsOptimized(forceRefresh);
+    const allStudents = await fetchAllStudentsOptimized(forceRefresh, seedClasses);
 
     // Filter theo grade - client-side filtering
     const students = allStudents
@@ -188,10 +179,10 @@ export const getGradeLeaderboard = async (grade, forceRefresh = false) => {
  * Lấy bảng xếp hạng toàn trung tâm - OPTIMIZED
  * Khối cao nhất luôn ở top, sau đó mới đến khối thấp hơn
  */
-export const getCenterLeaderboard = async (forceRefresh = false) => {
+export const getCenterLeaderboard = async (forceRefresh = false, seedClasses = null) => {
   try {
     // Fetch all students từ cache
-    const studentsWithGrade = await fetchAllStudentsOptimized(forceRefresh);
+    const studentsWithGrade = await fetchAllStudentsOptimized(forceRefresh, seedClasses);
 
     // Nhóm theo khối
     const gradeGroups = {};
@@ -276,6 +267,5 @@ export const getAllLeaderboards = async (studentClasses, studentGrade, forceRefr
  * Clear cache manually (dùng khi cần force refresh)
  */
 export const clearLeaderboardCache = () => {
-  leaderboardCache = null;
-  cacheTimestamp = null;
+  classesGradeMap = null;
 };

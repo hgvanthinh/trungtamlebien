@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { getAllClasses as getClasses, getClassStudents as getStudentsByClassIdAndRole } from '../../services/classService';
-import { getGradeLeaderboard, getCenterLeaderboard } from '../../services/leaderboardService';
+import { getGradeLeaderboard, getCenterLeaderboard, seedClassesGradeMap } from '../../services/leaderboardService';
 import Button from '../../components/common/Button';
 import Icon from '../../components/common/Icon';
 import Toast from '../../components/common/Toast';
@@ -23,6 +23,7 @@ import rankBgImg from '../../assets/ranks/rank-bg.gif';
 const Teaching = () => {
     const { currentUser, userProfile } = useAuth();
     const [classes, setClasses] = useState([]);
+    const classesRef = useRef([]);
     const [selectedClassId, setSelectedClassId] = useState(userProfile?.classes?.[0] || '');
     const [students, setStudents] = useState([]);
     const [gradeLeaderboard, setGradeLeaderboard] = useState([]);
@@ -49,6 +50,7 @@ const Teaching = () => {
                 });
 
                 setClasses(sortedClasses);
+                classesRef.current = sortedClasses;
 
                 if (sortedClasses.length > 0 && !selectedClassId) {
                     setSelectedClassId(sortedClasses[0].id);
@@ -60,25 +62,27 @@ const Teaching = () => {
 
     const fetchStudents = async () => {
         if (!selectedClassId) return;
+        const currentClasses = classesRef.current;
+        if (currentClasses.length === 0) return;
         setLoading(true);
-        const selectedClass = classes.find(c => c.id === selectedClassId);
+        const selectedClass = currentClasses.find(c => c.id === selectedClassId);
         const gradeNum = selectedClass
-            ? (selectedClass.grade || parseInt(selectedClass.name.match(/\d+/)?.[0] || '0', 10))
+            ? parseInt(selectedClass.grade || selectedClass.name.match(/\d+/)?.[0] || '0', 10)
             : 0;
 
+        seedClassesGradeMap(currentClasses);
         const [result, gradeResult, centerResult] = await Promise.all([
             getStudentsByClassIdAndRole(selectedClassId),
             getGradeLeaderboard(gradeNum),
             getCenterLeaderboard()
         ]);
-
         if (result.success) {
             setStudents(result.students);
             const initialColors = {};
             result.students.forEach(s => { initialColors[s.uid] = s.activeLabelColor || null; });
             setStudentColors(initialColors);
         }
-        if (gradeResult.success) setGradeLeaderboard(gradeResult.leaderboard);
+if (gradeResult.success) setGradeLeaderboard(gradeResult.leaderboard);
         if (centerResult.success) setCenterLeaderboard(centerResult.leaderboard);
         setLoading(false);
     };
@@ -302,11 +306,11 @@ const Teaching = () => {
                                                     <span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1" style={{ textShadow: '0 0 8px rgba(220, 38, 38, 0.5)' }}>
                                                         <Icon name="emoji_events" className="text-sm" /> {getStudentRank(student.uid, gradeLeaderboard)}/{getStudentRank(student.uid, centerLeaderboard)}
                                                     </span>
-                                                    <span className="text-yellow-600 dark:text-yellow-400 font-bold flex items-center gap-1" style={{ textShadow: '0 0 8px rgba(202, 138, 4, 0.5)' }}>
-                                                        <Icon name="paid" className="text-sm" /> <span>{student.coins || 0}<span className="text-amber-500 dark:text-amber-400">/{student.gold || 0}</span></span>
-                                                    </span>
                                                     <span className="text-green-600 dark:text-green-400 font-bold flex items-center gap-1" style={{ textShadow: '0 0 8px rgba(22, 163, 74, 0.5)' }}>
                                                         <Icon name="star" className="text-sm" /> {student.totalBehaviorPoints || 0}
+                                                    </span>
+                                                    <span className="text-yellow-600 dark:text-yellow-400 font-bold flex items-center gap-1" style={{ textShadow: '0 0 8px rgba(202, 138, 4, 0.5)' }}>
+                                                        <Icon name="paid" className="text-sm" /> <span>{student.coins || 0}<span className="text-amber-500 dark:text-amber-400">/{student.gold || 0}</span></span>
                                                     </span>
                                                     <span className="text-fuchsia-800 dark:text-fuchsia-500 font-bold flex items-center gap-1" style={{ textShadow: '0 0 8px rgba(37, 99, 235, 0.5)' }}>
                                                         <div className="transform scale-75 origin-center flex items-center"><Icon name="bolt" /></div>
