@@ -4,7 +4,7 @@
 import { useMemo } from 'react';
 import Avatar from '../../../components/common/Avatar';
 import Icon from '../../../components/common/Icon';
-import { TopRankBorder } from './TeachingSubComponents';
+import TopRankBorder from '../../../components/common/TopRankBorder';
 
 export function Leaderboard({ students, ripples, rippleGif, rankBgImg }) {
     // Top 10 by totalBehaviorPoints
