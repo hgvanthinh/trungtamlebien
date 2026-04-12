@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import Footer from './Footer';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBackground } from '../../contexts/BackgroundContext';
 import { doc, getDoc } from 'firebase/firestore';
@@ -106,6 +107,7 @@ const Layout = () => {
 
           {/* Page Content */}
           <Outlet />
+          <Footer />
         </main>
       </div>
     </div>

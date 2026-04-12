@@ -44,7 +44,7 @@ export function Leaderboard({ students, ripples, rippleGif, rankBgImg }) {
                 style={{ textShadow: `-2px -1px 0 #4ade80, 2px -1px 0 #4ade80, -1px 1px 0 #4ade80, 1px 1px 0 #4ade80` }}
             >
                 TOP XẾP HẠNG LỚP
-                <style jsx>{`
+                <style>{`
                     @keyframes neonGreen {
                         0%, 100% { filter: drop-shadow(0 0 6px rgba(132,204,22,1)) drop-shadow(0 0 18px rgba(163,230,53,0.95)) drop-shadow(0 0 36px rgba(34,197,94,0.85)); }
                         50% { filter: drop-shadow(0 0 12px rgba(132,204,22,1)) drop-shadow(0 0 30px rgba(163,230,53,1)) drop-shadow(0 0 54px rgba(34,197,94,0.95)); }

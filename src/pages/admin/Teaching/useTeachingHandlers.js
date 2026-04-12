@@ -1,7 +1,7 @@
 // src/pages/admin/Teaching/useTeachingHandlers.js
 // ─── Data handlers & business logic for Teaching page ──────────
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { saveSession, resetClassPointsAndCoins, resetStudyPoints, updateStudentLabelColor } from '../../../services/classService';
@@ -53,7 +53,7 @@ export function useTeachingHandlers({ students, selectedClassId, classes, fetchS
         return parts[parts.length - 1];
     };
 
-    const getSortedStudents = () => {
+    const getSortedStudents = useMemo(() => {
         const studentsCopy = [...students];
         switch (sortBy) {
             case 'name':
@@ -65,7 +65,7 @@ export function useTeachingHandlers({ students, selectedClassId, classes, fetchS
             default:
                 return studentsCopy;
         }
-    };
+    }, [students, sortBy]);
 
     const handleSortChange = (newSortBy) => {
         setSortBy(newSortBy);
@@ -97,13 +97,13 @@ export function useTeachingHandlers({ students, selectedClassId, classes, fetchS
     const handlePointsKeyDown = (e, studentUid) => {
         if (e.key === 'Enter' || e.key === 'ArrowDown') {
             e.preventDefault();
-            const sorted = getSortedStudents();
+            const sorted = getSortedStudents;
             const idx = sorted.findIndex(s => s.uid === studentUid);
             const next = sorted[idx + 1];
             if (next && pointsInputRefs.current[next.uid]) pointsInputRefs.current[next.uid].focus();
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
-            const sorted = getSortedStudents();
+            const sorted = getSortedStudents;
             const idx = sorted.findIndex(s => s.uid === studentUid);
             const prev = sorted[idx - 1];
             if (prev && pointsInputRefs.current[prev.uid]) pointsInputRefs.current[prev.uid].focus();
@@ -113,13 +113,13 @@ export function useTeachingHandlers({ students, selectedClassId, classes, fetchS
     const handleCoinsKeyDown = (e, studentUid) => {
         if (e.key === 'Enter' || e.key === 'ArrowDown') {
             e.preventDefault();
-            const sorted = getSortedStudents();
+            const sorted = getSortedStudents;
             const idx = sorted.findIndex(s => s.uid === studentUid);
             const next = sorted[idx + 1];
             if (next && coinsInputRefs.current[next.uid]) coinsInputRefs.current[next.uid].focus();
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
-            const sorted = getSortedStudents();
+            const sorted = getSortedStudents;
             const idx = sorted.findIndex(s => s.uid === studentUid);
             const prev = sorted[idx - 1];
             if (prev && coinsInputRefs.current[prev.uid]) coinsInputRefs.current[prev.uid].focus();
@@ -129,13 +129,13 @@ export function useTeachingHandlers({ students, selectedClassId, classes, fetchS
     const handleStudyPointsKeyDown = (e, studentUid) => {
         if (e.key === 'Enter' || e.key === 'ArrowDown') {
             e.preventDefault();
-            const sorted = getSortedStudents();
+            const sorted = getSortedStudents;
             const idx = sorted.findIndex(s => s.uid === studentUid);
             const next = sorted[idx + 1];
             if (next && studyPointsInputRefs.current[next.uid]) studyPointsInputRefs.current[next.uid].focus();
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
-            const sorted = getSortedStudents();
+            const sorted = getSortedStudents;
             const idx = sorted.findIndex(s => s.uid === studentUid);
             const prev = sorted[idx - 1];
             if (prev && studyPointsInputRefs.current[prev.uid]) studyPointsInputRefs.current[prev.uid].focus();

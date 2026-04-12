@@ -51,9 +51,7 @@ const fetchAllStudentsOptimized = async (forceRefresh = false) => {
     const studentsQuery = query(usersRef, where('role', '==', 'student'));
     const studentsSnapshot = await getDocs(studentsQuery);
 
-    const students = [];
-
-    for (const docSnapshot of studentsSnapshot.docs) {
+    const students = await Promise.all(studentsSnapshot.docs.map(async (docSnapshot) => {
       const userData = docSnapshot.data();
 
       // Lấy grade từ classes nếu chưa có denormalized field
@@ -62,7 +60,7 @@ const fetchAllStudentsOptimized = async (forceRefresh = false) => {
         grade = await getStudentGrade(userData.classes);
       }
 
-      students.push({
+      return {
         uid: docSnapshot.id,
         fullName: userData.fullName,
         username: userData.username,
@@ -71,8 +69,8 @@ const fetchAllStudentsOptimized = async (forceRefresh = false) => {
         coins: userData.coins || 0,
         grade: grade,
         classes: userData.classes || [],
-      });
-    }
+      };
+    }));
 
     // Update cache
     leaderboardCache = students;

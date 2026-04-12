@@ -61,27 +61,25 @@ const Teaching = () => {
     const fetchStudents = async () => {
         if (!selectedClassId) return;
         setLoading(true);
-        // Add artificial delay for loading animation
-        await new Promise(resolve => setTimeout(resolve, 800));
+        const selectedClass = classes.find(c => c.id === selectedClassId);
+        const gradeNum = selectedClass
+            ? (selectedClass.grade || parseInt(selectedClass.name.match(/\d+/)?.[0] || '0', 10))
+            : 0;
 
-        const result = await getStudentsByClassIdAndRole(selectedClassId);
+        const [result, gradeResult, centerResult] = await Promise.all([
+            getStudentsByClassIdAndRole(selectedClassId),
+            getGradeLeaderboard(gradeNum),
+            getCenterLeaderboard()
+        ]);
+
         if (result.success) {
             setStudents(result.students);
             const initialColors = {};
             result.students.forEach(s => { initialColors[s.uid] = s.activeLabelColor || null; });
             setStudentColors(initialColors);
         }
-
-        const selectedClass = classes.find(c => c.id === selectedClassId);
-        if (selectedClass) {
-            const gradeNum = selectedClass.grade || parseInt(selectedClass.name.match(/\d+/)?.[0] || '0', 10);
-            const [gradeResult, centerResult] = await Promise.all([
-                getGradeLeaderboard(gradeNum),
-                getCenterLeaderboard()
-            ]);
-            if (gradeResult.success) setGradeLeaderboard(gradeResult.leaderboard);
-            if (centerResult.success) setCenterLeaderboard(centerResult.leaderboard);
-        }
+        if (gradeResult.success) setGradeLeaderboard(gradeResult.leaderboard);
+        if (centerResult.success) setCenterLeaderboard(centerResult.leaderboard);
         setLoading(false);
     };
 
@@ -242,7 +240,7 @@ const Teaching = () => {
                         {/* Student Cards */}
                         {overviewMode ? (
                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 auto-rows-max">
-                                {getSortedStudents().map((student, index) => (
+                                {getSortedStudents.map((student, index) => (
                                     <div key={student.uid} className="clay-card p-2 flex items-center gap-2 min-w-0">
                                         <span className="text-[#608a67] dark:text-[#8ba890] font-bold text-xs w-5 flex-shrink-0">{index + 1}.</span>
                                         <div
@@ -268,7 +266,7 @@ const Teaching = () => {
                             </div>
                         ) : (
                             <div className="space-y-3">
-                                {getSortedStudents().map((student, index) => (
+                                {getSortedStudents.map((student, index) => (
                                     <div key={student.uid} className="clay-card p-4 hover:shadow-md transition-all">
                                         <div className="flex items-center gap-4">
                                             {/* Color Radio Buttons */}
