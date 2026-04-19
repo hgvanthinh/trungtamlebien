@@ -79,7 +79,7 @@ const Teaching = () => {
         if (result.success) {
             setStudents(result.students);
             const initialColors = {};
-            result.students.forEach(s => { initialColors[s.uid] = s.activeLabelColor || null; });
+            result.students.forEach(s => { initialColors[s.uid] = s.labelColor || null; });
             setStudentColors(initialColors);
         }
 if (gradeResult.success) setGradeLeaderboard(gradeResult.leaderboard);
@@ -404,7 +404,7 @@ if (gradeResult.success) setGradeLeaderboard(gradeResult.leaderboard);
                 const zoomedStudent = students.find(s => s.uid === zoomedAvatarId);
                 if (!zoomedStudent) return null;
                 return (
-                    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] pointer-events-none" style={{ animation: 'fadeIn 0.25s ease' }}>
+                    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[200] cursor-pointer" style={{ animation: 'fadeIn 0.25s ease' }} onClick={() => setZoomedAvatarId(null)}>
                         <style>{`
                             @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
                             @keyframes zoomFromOrigin {

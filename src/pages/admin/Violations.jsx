@@ -20,7 +20,7 @@ const Violations = () => {
 
   // Sort states
   const [showSortMenu, setShowSortMenu] = useState(false);
-  const [sortBy, setSortBy] = useState('debt'); // 'name', 'debt', 'total'
+  const [sortBy, setSortBy] = useState('name'); // 'name', 'debt', 'total'
 
   // Overview mode
   const [overviewMode, setOverviewMode] = useState(false);
