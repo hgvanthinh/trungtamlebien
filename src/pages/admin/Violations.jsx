@@ -420,7 +420,7 @@ const Violations = () => {
           <option value="">-- Chọn lớp --</option>
           {classes.map((classItem) => (
             <option key={classItem.id} value={classItem.id}>
-              {classItem.name} ({classItem.studentCount} học sinh)
+              {classItem.displayName || classItem.name} ({classItem.studentCount} học sinh)
             </option>
           ))}
         </select>

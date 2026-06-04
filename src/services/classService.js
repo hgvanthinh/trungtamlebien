@@ -511,6 +511,26 @@ export const resetViolations = async (studentUids) => {
   }
 };
 
+/**
+ * Cập nhật tên hiển thị tùy chỉnh cho lớp học
+ * @param {string} classId - ID lớp học
+ * @param {string|null} displayName - Tên hiển thị mới (null để xóa về tên gốc)
+ */
+export const updateClassDisplayName = async (classId, displayName) => {
+  try {
+    checkAdminPermission();
+    const classRef = doc(db, 'classes', classId);
+    await updateDoc(classRef, {
+      displayName: displayName || null,
+      updatedAt: serverTimestamp(),
+    });
+    return { success: true };
+  } catch (error) {
+    console.error('Error updating class display name:', error);
+    return { success: false, error: error.message || 'Lỗi khi cập nhật tên hiển thị' };
+  }
+};
+
 export const saveClassTotalPayment = async (classId, totalPayment) => {
   try {
     checkAdminPermission();

@@ -369,7 +369,7 @@ const Students = () => {
               <option value="">Tất cả lớp</option>
               <option value="__unassigned__">Chưa phân lớp</option>
               {classes.map((cls) => (
-                <option key={cls.id} value={cls.id}>{cls.name}</option>
+                <option key={cls.id} value={cls.id}>{cls.displayName || cls.name}</option>
               ))}
             </select>
             <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[#608a67] dark:text-[#8ba890] pointer-events-none">
@@ -694,7 +694,7 @@ const Students = () => {
                   return (
                     <div key={cls.id} className="flex items-center justify-between p-4 rounded-xl bg-[#f0f5f1] dark:bg-white/5 hover:bg-[#e0f0e5] dark:hover:bg-white/10 transition-all">
                       <div>
-                        <p className="font-bold text-[#111812] dark:text-white">{cls.name}</p>
+                        <p className="font-bold text-[#111812] dark:text-white">{cls.displayName || cls.name}</p>
                         <p className="text-sm text-[#608a67] dark:text-[#8ba890]">Khối {cls.grade} • {cls.studentCount || 0} học sinh</p>
                       </div>
                       <button
@@ -750,7 +750,7 @@ const Students = () => {
                     className="w-full flex items-center justify-between p-4 rounded-xl bg-[#f0f5f1] dark:bg-white/5 hover:bg-primary hover:text-[#052e16] dark:hover:bg-primary transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <div>
-                      <p className="font-bold">{cls.name}</p>
+                      <p className="font-bold">{cls.displayName || cls.name}</p>
                       <p className="text-sm opacity-80">Khối {cls.grade} • {cls.studentCount || 0} học sinh</p>
                     </div>
                     <Icon name="arrow_forward" />

@@ -89,7 +89,7 @@ const AssignExamModal = ({ exam, classes, onClose, onAssign }) => {
                             <option value="">-- Chọn lớp --</option>
                             {classes.map((cls) => (
                                 <option key={cls.id} value={cls.id}>
-                                    {cls.name} (Khối {cls.grade}) - {cls.studentCount || 0} học sinh
+                                    {cls.displayName || cls.name} (Khối {cls.grade}) - {cls.studentCount || 0} học sinh
                                 </option>
                             ))}
                         </select>

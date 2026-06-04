@@ -58,7 +58,7 @@ const GradeStats = () => {
                         ...sub,
                         assignmentId: assignment.id,
                         classId: assignment.classId,
-                        className: classMap[assignment.classId]?.name || 'N/A',
+                        className: classMap[assignment.classId]?.displayName || classMap[assignment.classId]?.name || 'N/A',
                         examId: assignment.examId,
                         deadline: assignment.deadline,
                     });
@@ -285,7 +285,7 @@ const GradeStats = () => {
                             className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-[#111812] dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
                         >
                             {Object.values(classes).map(cls => (
-                                <option key={cls.id} value={cls.id}>{cls.name}</option>
+                                <option key={cls.id} value={cls.id}>{cls.displayName || cls.name}</option>
                             ))}
                         </select>
                         {loadingClass && (
@@ -312,7 +312,7 @@ const GradeStats = () => {
                                 const cls = classes[a.classId];
                                 return (
                                     <option key={a.id} value={a.id}>
-                                        {exam?.title || 'Đề thi'} – Lớp {cls?.name}
+                                        {exam?.title || 'Đề thi'} – Lớp {cls?.displayName || cls?.name}
                                     </option>
                                 );
                             })}

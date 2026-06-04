@@ -243,7 +243,7 @@ const Attendance = () => {
 
         // Tạo tên file
         const scopeName = selectedScope === 'class'
-            ? classes.find(c => c.id === selectedClass)?.name
+            ? (classes.find(c => c.id === selectedClass)?.displayName || classes.find(c => c.id === selectedClass)?.name)
             : selectedScope === 'grade'
                 ? `Khối ${selectedGrade}`
                 : 'Toàn trung tâm';
@@ -308,7 +308,7 @@ const Attendance = () => {
                                 <option value="">Chọn lớp</option>
                                 {classes.map(cls => (
                                     <option key={cls.id} value={cls.id}>
-                                        {cls.name} (Khối {cls.grade})
+                                        {cls.displayName || cls.name} (Khối {cls.grade})
                                     </option>
                                 ))}
                             </select>

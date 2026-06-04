@@ -104,7 +104,7 @@ const Profile = () => {
     return userProfile.classes
       .map(classId => {
         const cls = classes.find(c => c.id === classId);
-        return cls ? cls.name : null;
+        return cls ? (cls.displayName || cls.name) : null;
       })
       .filter(Boolean);
   };

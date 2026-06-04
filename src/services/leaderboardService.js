@@ -91,7 +91,7 @@ export const getClassLeaderboard = async (classId, forceRefresh = false) => {
     const studentUids = classData.students || [];
 
     if (studentUids.length === 0) {
-      return { success: true, leaderboard: [], className: classData.name };
+      return { success: true, leaderboard: [], className: classData.displayName || classData.name };
     }
 
     // Fetch all students từ cache
@@ -121,7 +121,7 @@ export const getClassLeaderboard = async (classId, forceRefresh = false) => {
     return {
       success: true,
       leaderboard,
-      className: classData.name,
+      className: classData.displayName || classData.name,
       totalStudents: students.length
     };
   } catch (error) {

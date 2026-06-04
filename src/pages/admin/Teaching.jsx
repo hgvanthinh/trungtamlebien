@@ -144,7 +144,7 @@ if (gradeResult.success) setGradeLeaderboard(gradeResult.leaderboard);
                         >
                             {classes.map((cls) => (
                                 <option key={cls.id} value={cls.id}>
-                                    {cls.name}
+                                    {cls.displayName || cls.name}
                                 </option>
                             ))}
                         </select>

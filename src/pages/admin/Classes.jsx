@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import Icon from '../../components/common/Icon';
 import Toast from '../../components/common/Toast';
-import { getAllClasses, createClass, deleteClass, removeStudentFromClass } from '../../services/classService';
+import { getAllClasses, createClass, deleteClass, removeStudentFromClass, updateClassDisplayName } from '../../services/classService';
 import { getAllStudents } from '../../services/adminService';
 
 const Classes = () => {
@@ -15,6 +15,10 @@ const Classes = () => {
   const [newClassGrade, setNewClassGrade] = useState('6');
   const [isCreating, setIsCreating] = useState(false);
   const [toast, setToast] = useState(null);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renamingClass, setRenamingClass] = useState(null);
+  const [newDisplayName, setNewDisplayName] = useState('');
+  const [isRenaming, setIsRenaming] = useState(false);
 
   useEffect(() => {
     fetchClasses();
@@ -100,6 +104,29 @@ const Classes = () => {
     setShowManageModal(true);
   };
 
+  const handleOpenRename = (classItem) => {
+    setRenamingClass(classItem);
+    setNewDisplayName(classItem.displayName || '');
+    setShowRenameModal(true);
+  };
+
+  const handleRenameClass = async () => {
+    if (!renamingClass) return;
+    setIsRenaming(true);
+    const trimmed = newDisplayName.trim();
+    const result = await updateClassDisplayName(renamingClass.id, trimmed || null);
+    setIsRenaming(false);
+    if (result.success) {
+      setShowRenameModal(false);
+      setRenamingClass(null);
+      setNewDisplayName('');
+      setToast({ type: 'success', message: trimmed ? `Đã đổi tên hiển thị thành "${trimmed}"` : 'Đã xóa tên hiển thị tùy chỉnh' });
+      fetchClasses();
+    } else {
+      setToast({ type: 'error', message: result.error || 'Lỗi khi đổi tên hiển thị' });
+    }
+  };
+
   const handleRemoveStudent = async (studentUid) => {
     if (!selectedClass) return;
     if (!confirm('Xóa học sinh khỏi lớp?')) return;
@@ -167,23 +194,41 @@ const Classes = () => {
               className="clay-card p-6 hover:shadow-xl transition-all cursor-pointer"
             >
               <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h3 className="text-xl font-bold text-[#111812] dark:text-white">
-                    {classItem.name}
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-xl font-bold text-[#111812] dark:text-white truncate">
+                    {classItem.displayName || classItem.name}
                   </h3>
+                  {classItem.displayName && (
+                    <p className="text-xs text-[#608a67] dark:text-[#8ba890] font-mono truncate">
+                      {classItem.name}
+                    </p>
+                  )}
                   <p className="text-[#608a67] dark:text-[#8ba890]">
                     Khối {classItem.grade}
                   </p>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteClass(classItem.id, classItem.name);
-                  }}
-                  className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-red-600 dark:text-red-400 transition-colors"
-                >
-                  <Icon name="delete" />
-                </button>
+                <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenRename(classItem);
+                    }}
+                    className="p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg text-blue-500 dark:text-blue-400 transition-colors"
+                    title="Đổi tên hiển thị"
+                  >
+                    <Icon name="edit" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteClass(classItem.id, classItem.displayName || classItem.name);
+                    }}
+                    className="p-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-red-600 dark:text-red-400 transition-colors"
+                    title="Xóa lớp"
+                  >
+                    <Icon name="delete" />
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center gap-2 mb-4 text-[#608a67] dark:text-[#8ba890]">
@@ -276,7 +321,7 @@ const Classes = () => {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="text-2xl font-bold text-[#111812] dark:text-white">
-                  Danh sách học sinh - {selectedClass.name}
+                  Danh sách học sinh - {selectedClass.displayName || selectedClass.name}
                 </h2>
                 <p className="text-[#608a67] dark:text-[#8ba890]">
                   {selectedClass.studentCount || 0} học sinh
@@ -356,6 +401,77 @@ const Classes = () => {
                 </p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Rename Display Name Modal */}
+      {showRenameModal && renamingClass && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="clay-card p-6 max-w-md w-full">
+            <h2 className="text-2xl font-bold text-[#111812] dark:text-white mb-1">
+              Đổi tên hiển thị
+            </h2>
+            <p className="text-sm text-[#608a67] dark:text-[#8ba890] mb-5">
+              Tên hệ thống: <span className="font-mono font-semibold">{renamingClass.name}</span>
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-[#111812] dark:text-white mb-2">
+                  Tên hiển thị mới
+                </label>
+                <input
+                  type="text"
+                  value={newDisplayName}
+                  onChange={(e) => setNewDisplayName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleRenameClass()}
+                  placeholder={`Ví dụ: Lớp 6A, Nhóm Anh...`}
+                  className="w-full px-4 py-3 rounded-xl border border-[#d0e5d4] dark:border-white/20 bg-white dark:bg-white/5 text-[#111812] dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                  autoFocus
+                />
+              </div>
+              {newDisplayName.trim() && (
+                <div className="px-4 py-3 rounded-xl bg-primary/10 border border-primary/20">
+                  <p className="text-xs text-[#608a67] dark:text-[#8ba890] mb-1">Xem trước:</p>
+                  <p className="font-bold text-[#111812] dark:text-white">{newDisplayName.trim()}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => { setShowRenameModal(false); setRenamingClass(null); setNewDisplayName(''); }}
+                disabled={isRenaming}
+                className="flex-1 py-3 px-4 rounded-xl border border-[#d0e5d4] dark:border-white/20 text-[#111812] dark:text-white font-medium hover:bg-[#f0f5f1] dark:hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Hủy
+              </button>
+              {renamingClass.displayName && (
+                <button
+                  onClick={() => { setNewDisplayName(''); handleRenameClass(); }}
+                  disabled={isRenaming}
+                  className="py-3 px-4 rounded-xl border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Xóa tên tùy chỉnh, về tên gốc"
+                >
+                  Về tên gốc
+                </button>
+              )}
+              <button
+                onClick={handleRenameClass}
+                disabled={isRenaming}
+                className="flex-1 py-3 px-4 rounded-xl bg-primary text-[#052e16] font-bold hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isRenaming ? (
+                  <>
+                    <Icon name="progress_activity" className="animate-spin" />
+                    <span>Đang lưu...</span>
+                  </>
+                ) : (
+                  'Lưu tên'
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
