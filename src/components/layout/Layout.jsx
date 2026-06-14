@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import Footer from './Footer';
+import PigTeachingBanner from '../pig/PigTeachingBanner';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBackground } from '../../contexts/BackgroundContext';
 import { doc, getDoc } from 'firebase/firestore';
@@ -104,6 +105,9 @@ const Layout = () => {
             onMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
             notificationCount={2}
           />
+
+          {/* Thông báo giờ dạy heo học (chỉ học sinh) */}
+          <PigTeachingBanner />
 
           {/* Page Content */}
           <Outlet />

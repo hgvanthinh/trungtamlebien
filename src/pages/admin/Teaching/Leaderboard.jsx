@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 import Avatar from '../../../components/common/Avatar';
 import Icon from '../../../components/common/Icon';
 import TopRankBorder from '../../../components/common/TopRankBorder';
+import RunningPigBadge from '../../../components/common/RunningPigBadge';
 
 export function Leaderboard({ students, ripples, rippleGif, rankBgImg }) {
     // Top 10 by totalBehaviorPoints
@@ -159,6 +160,7 @@ export function Leaderboard({ students, ripples, rippleGif, rankBgImg }) {
                         <span className="text-2xl font-bold text-gray-900 dark:text-white w-8">{index + 1}</span>
                         <span className="flex-1 font-medium text-gray-900 dark:text-white truncate">
                             {student.fullName.split(' ').slice(-2).join(' ')}
+                            <RunningPigBadge level={student.pigLevel} />
                         </span>
                         <span className="text-lg font-bold text-gray-900 dark:text-white">
                             {student.totalBehaviorPoints || 0}

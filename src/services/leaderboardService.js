@@ -62,6 +62,7 @@ const fetchAllStudentsOptimized = async (_forceRefresh = false, seedClasses = nu
         avatar: userData.avatar,
         totalBehaviorPoints: userData.totalBehaviorPoints || 0,
         coins: userData.coins || 0,
+        pigLevel: userData.pigLevel || 0,
         grade,
         classes: userClasses,
       };
@@ -100,13 +101,14 @@ export const getClassLeaderboard = async (classId, forceRefresh = false) => {
     // Filter theo classId - client-side filtering
     const students = allStudents
       .filter(student => studentUids.includes(student.uid))
-      .map(({ uid, fullName, username, avatar, totalBehaviorPoints, coins }) => ({
+      .map(({ uid, fullName, username, avatar, totalBehaviorPoints, coins, pigLevel }) => ({
         uid,
         fullName,
         username,
         avatar,
         totalBehaviorPoints,
         coins,
+        pigLevel,
       }));
 
     // Sắp xếp theo điểm giảm dần
@@ -141,13 +143,14 @@ export const getGradeLeaderboard = async (grade, forceRefresh = false, seedClass
     // Filter theo grade - client-side filtering
     const students = allStudents
       .filter(student => student.grade === grade)
-      .map(({ uid, fullName, username, avatar, totalBehaviorPoints, coins }) => ({
+      .map(({ uid, fullName, username, avatar, totalBehaviorPoints, coins, pigLevel }) => ({
         uid,
         fullName,
         username,
         avatar,
         totalBehaviorPoints,
         coins,
+        pigLevel,
       }));
 
     if (students.length === 0) {
@@ -261,6 +264,14 @@ export const getAllLeaderboards = async (studentClasses, studentGrade, forceRefr
     console.error('Error getting all leaderboards:', error);
     return { success: false, error: error.message };
   }
+};
+
+/**
+ * Lấy khối (grade) của 1 học sinh dựa trên lớp đầu tiên (dùng cho game heo đất)
+ */
+export const getStudentGrade = async (userClasses) => {
+  const gradeMap = await fetchClassesGradeMap();
+  return userClasses && userClasses.length > 0 ? (gradeMap[userClasses[0]] || 0) : 0;
 };
 
 /**

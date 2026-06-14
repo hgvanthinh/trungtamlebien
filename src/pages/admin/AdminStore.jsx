@@ -7,6 +7,7 @@ import {
     uploadItemImage,
     deleteItemImage
 } from '../../services/storeService';
+import { compressStoreImage } from '../../services/fileProcessingService';
 import CoinIcon from '../../components/common/CoinIcon';
 import GoldIcon from '../../components/common/GoldIcon';
 import Toast from '../../components/common/Toast';
@@ -77,10 +78,11 @@ export default function AdminStore() {
 
             let imageUrl = formData.imageUrl;
 
-            // Upload new image if selected
+            // Upload new image if selected (nén trước khi upload — ảnh card nhỏ, max 800px)
             if (imageFile) {
                 const tempId = editingItem?.id || `temp_${Date.now()}`;
-                imageUrl = await uploadItemImage(imageFile, tempId);
+                const compressedFile = await compressStoreImage(imageFile);
+                imageUrl = await uploadItemImage(compressedFile, tempId);
 
                 // Delete old image if editing
                 if (editingItem && editingItem.imageUrl && editingItem.imageUrl !== imageUrl) {
@@ -256,7 +258,7 @@ export default function AdminStore() {
                                 {/* Category Badge */}
                                 <div className="mb-2">
                                     <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-md text-xs font-semibold">
-                                        🖼️ Viền Avatar
+                                        {item.category === 'pig-food' ? '🌽 Thức ăn heo' : '🖼️ Viền Avatar'}
                                     </span>
                                     {item.discontinued && (
                                         <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 rounded-md text-xs font-semibold ml-2">
@@ -386,13 +388,19 @@ export default function AdminStore() {
                                     </label>
                                     <select
                                         value={formData.category}
-                                        onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                                        onChange={(e) => setFormData({
+                                            ...formData,
+                                            category: e.target.value,
+                                            // Thức ăn heo luôn mua bằng Xu theo luật game
+                                            ...(e.target.value === 'pig-food' ? { currency: 'coins' } : {})
+                                        })}
                                         className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
                       bg-white dark:bg-gray-700 text-gray-900 dark:text-white
                       focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                         required
                                     >
                                         <option value="avatar-border">🖼️ Viền Avatar</option>
+                                        <option value="pig-food">🌽 Thức ăn heo (game Heo Đất)</option>
                                     </select>
                                 </div>
 

@@ -3,6 +3,9 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { getExamById } from '../../services/examBankService';
+import { getAssignmentById } from '../../services/assignmentService';
+import { awardExamXp } from '../../services/pigService';
+import { getPigGameSettings } from '../../services/gameSettingsService';
 import Icon from '../../components/common/Icon';
 import Toast from '../../components/common/Toast';
 import PDFAnnotator from '../../components/exam/PDFAnnotator';
@@ -84,6 +87,31 @@ const GradeSubmissionDetail = () => {
         status: 'graded',
         gradedAt: serverTimestamp(),
       });
+
+      // Đề "Dạy heo học" dạng upload: cộng XP cho heo lúc chấm,
+      // check khung giờ theo submittedAt (giờ server, chống gian lận giờ máy)
+      try {
+        if (submission?.assignmentId) {
+          const assignment = await getAssignmentById(submission.assignmentId);
+          if (assignment?.isPigTeaching && submission.submittedAt) {
+            const settings = await getPigGameSettings();
+            const result = await awardExamXp(
+              submission.studentUid,
+              submission.studentName || '',
+              submissionId,
+              { totalScore: parseFloat(score), maxScore: submission.maxScore || 10 },
+              assignment,
+              settings,
+              submission.submittedAt.toDate()
+            );
+            if (result.awarded) {
+              setToast({ type: 'success', message: `🐷 Heo của ${submission.studentName} +${result.xpGained} XP!` });
+            }
+          }
+        }
+      } catch (pigError) {
+        console.error('Pig XP award error:', pigError);
+      }
 
       if (isLastSubmission) {
         setToast({ type: 'success', message: 'Đã chấm xong tất cả bài! Quay về danh sách.' });

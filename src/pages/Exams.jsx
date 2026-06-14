@@ -78,6 +78,13 @@ const Exams = () => {
     return submissions.filter((s) => s.assignmentId === assignmentId && s.status !== 'in_progress').length;
   };
 
+  // Đề có giờ mở (startTime) chưa tới → khóa, chưa cho làm
+  const isLockedAssignment = (assignment) => {
+    if (!assignment.startTime) return false;
+    const start = assignment.startTime.toDate ? assignment.startTime.toDate() : assignment.startTime;
+    return start > new Date();
+  };
+
   // Filter valid assignments (exam exists and not expired)
   const isValidAssignment = (assignment) => {
     const exam = exams[assignment.examId];
@@ -166,6 +173,8 @@ const Exams = () => {
 
               const deadline = assignment.deadline?.toDate();
               const daysLeft = deadline ? Math.ceil((deadline - new Date()) / (1000 * 60 * 60 * 24)) : 0;
+              const locked = isLockedAssignment(assignment);
+              const startTime = assignment.startTime?.toDate ? assignment.startTime.toDate() : assignment.startTime;
 
               return (
                 <Card key={assignment.id} className="hover:shadow-lg transition">
@@ -185,6 +194,11 @@ const Exams = () => {
                         <h3 className="font-bold text-[#111812] dark:text-white mb-1 line-clamp-2">
                           {exam.title}
                         </h3>
+                        {assignment.isPigTeaching && (
+                          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-pink-100 dark:bg-pink-900/30 text-pink-600 dark:text-pink-400 rounded-full font-semibold">
+                            🐷 Dạy heo học — nộp bài được XP cho heo
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -219,13 +233,22 @@ const Exams = () => {
                       {daysLeft === 0 && ' (hôm nay)'}
                     </div>
 
+                    {/* Giờ mở đề */}
+                    {locked && startTime && (
+                      <div className="mb-3 p-2 rounded-lg text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 font-semibold">
+                        <Icon name="lock_clock" className="inline mr-1" />
+                        Mở lúc {startTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} ngày {startTime.toLocaleDateString('vi-VN')}
+                      </div>
+                    )}
+
                     {/* Action */}
                     <Button
                       variant="primary"
-                      onClick={() => navigate(`/exam/${exam.id}?assignmentId=${assignment.id}`)}
-                      className="w-full"
+                      onClick={() => !locked && navigate(`/exam/${exam.id}?assignmentId=${assignment.id}`)}
+                      disabled={locked}
+                      className={`w-full ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      {exam.type === 'upload' ? 'Xem đề' : 'Bắt đầu làm bài'}
+                      {locked ? '🔒 Chưa tới giờ mở đề' : exam.type === 'upload' ? 'Xem đề' : 'Bắt đầu làm bài'}
                     </Button>
                   </div>
                 </Card>

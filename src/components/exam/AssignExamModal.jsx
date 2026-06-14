@@ -5,6 +5,9 @@ const AssignExamModal = ({ exam, classes, onClose, onAssign }) => {
     const [selectedClassId, setSelectedClassId] = useState('');
     const [deadline, setDeadline] = useState('');
     const [deadlineTime, setDeadlineTime] = useState('00:00');
+    const [isPigTeaching, setIsPigTeaching] = useState(false);
+    const [startDate, setStartDate] = useState('');
+    const [startTime, setStartTime] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -42,8 +45,28 @@ const AssignExamModal = ({ exam, classes, onClose, onAssign }) => {
             return;
         }
 
+        // Giờ mở đề (bắt buộc với "Dạy heo học", tùy chọn với đề thường)
+        let startDateTime = null;
+        if (isPigTeaching && (!startDate || !startTime)) {
+            setError('Đề "Dạy heo học" cần có giờ mở đề');
+            return;
+        }
+        if (startDate && startTime) {
+            const [sh, sm] = startTime.split(':').map(Number);
+            const [sy, smo, sd] = startDate.split('-').map(Number);
+            startDateTime = new Date(sy, smo - 1, sd, sh, sm, 0, 0);
+
+            if (startDateTime >= deadlineDate) {
+                setError('Giờ mở đề phải trước thời hạn nộp bài');
+                return;
+            }
+        }
+
         setIsLoading(true);
-        await onAssign(selectedClassId, deadlineDate);
+        await onAssign(selectedClassId, deadlineDate, {
+            startTime: startDateTime,
+            isPigTeaching
+        });
         setIsLoading(false);
     };
 
@@ -119,6 +142,51 @@ const AssignExamModal = ({ exam, classes, onClose, onAssign }) => {
                         </div>
                         <p className="text-xs text-[#608a67] dark:text-[#8ba890] mt-1">
                             Học sinh sẽ thấy bài này cho đến {deadline && deadlineTime ? `${new Date(deadline).toLocaleDateString('vi-VN')} lúc ${deadlineTime}` : '...'}
+                        </p>
+                    </div>
+
+                    {/* Dạy heo học */}
+                    <div className="p-3 bg-pink-50 dark:bg-pink-900/20 rounded-xl">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={isPigTeaching}
+                                onChange={(e) => setIsPigTeaching(e.target.checked)}
+                                disabled={isLoading}
+                                className="w-4 h-4 accent-pink-500"
+                            />
+                            <span className="font-medium text-[#111812] dark:text-white">
+                                🐷 Dạy heo học
+                            </span>
+                        </label>
+                        <p className="text-xs text-[#608a67] dark:text-[#8ba890] mt-1">
+                            HS nộp bài trong khung giờ sẽ được cộng XP cho heo bằng điểm bài làm (thang 10)
+                        </p>
+                    </div>
+
+                    {/* Giờ mở đề */}
+                    <div>
+                        <label className="block text-sm font-medium text-[#111812] dark:text-white mb-2">
+                            Giờ mở đề {isPigTeaching ? <span className="text-red-500">*</span> : <span className="text-xs text-[#608a67]">(tùy chọn)</span>}
+                        </label>
+                        <div className="flex gap-2">
+                            <input
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="clay-input flex-1 px-4 py-3 rounded-xl"
+                                disabled={isLoading}
+                            />
+                            <input
+                                type="time"
+                                value={startTime}
+                                onChange={(e) => setStartTime(e.target.value)}
+                                className="clay-input w-32 px-4 py-3 rounded-xl"
+                                disabled={isLoading}
+                            />
+                        </div>
+                        <p className="text-xs text-[#608a67] dark:text-[#8ba890] mt-1">
+                            Trước giờ này học sinh thấy đề nhưng chưa làm được. Để trống = mở ngay.
                         </p>
                     </div>
 

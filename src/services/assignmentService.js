@@ -2,6 +2,7 @@ import {
     collection,
     addDoc,
     getDocs,
+    getDoc,
     doc,
     updateDoc,
     deleteDoc,
@@ -102,6 +103,19 @@ export const getAssignmentsForStudent = async (studentClassIds) => {
     } catch (error) {
         console.error('Error getting assignments for student:', error);
         return { success: false, error: error.message };
+    }
+};
+
+/**
+ * Lấy 1 bài giao theo id (dùng cho game heo đất - check khung giờ "Dạy heo học")
+ */
+export const getAssignmentById = async (assignmentId) => {
+    try {
+        const snap = await getDoc(doc(db, 'assignments', assignmentId));
+        return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+    } catch (error) {
+        console.error('Error getting assignment:', error);
+        return null;
     }
 };
 

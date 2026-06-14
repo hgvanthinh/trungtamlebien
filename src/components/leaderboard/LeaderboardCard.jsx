@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Icon from '../common/Icon';
 import Avatar from '../common/Avatar';
+import RunningPigBadge from '../common/RunningPigBadge';
 
 const LeaderboardCard = ({ title, subtitle, leaderboard, currentUserUid, showGrade = false }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -92,6 +93,7 @@ const LeaderboardCard = ({ title, subtitle, leaderboard, currentUserUid, showGra
                       <p className="font-bold text-[#111812] dark:text-white truncate">
                         {student.fullName}
                       </p>
+                      <RunningPigBadge level={student.pigLevel} />
                       {isCurrentUser && (
                         <span className="px-2 py-1 text-xs font-medium bg-primary text-[#052e16] rounded-lg">
                           Bạn

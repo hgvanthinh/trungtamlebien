@@ -31,6 +31,9 @@ import BackgroundSettings from './pages/admin/BackgroundSettings';
 import Store from './pages/Store';
 import Inventory from './pages/Inventory';
 import AdminStore from './pages/admin/AdminStore';
+import PigPet from './pages/PigPet';
+import Transfer from './pages/Transfer';
+import AdminPigGame from './pages/admin/AdminPigGame';
 import GameLobby from './pages/public/GameLobby';
 import BombGame from './pages/public/BombGame';
 import PhaserBombGame from './pages/public/PhaserBombGame';
@@ -63,6 +66,8 @@ function App() {
                 <Route path="crafting" element={<Crafting />} />
                 <Route path="store" element={<Store />} />
                 <Route path="inventory" element={<Inventory />} />
+                <Route path="pig" element={<PigPet />} />
+                <Route path="transfer" element={<Transfer />} />
                 <Route path="exams" element={<Exams />} />
                 <Route path="exam/:examId" element={<ExamTaking />} />
                 <Route path="exam/:examId/result/:submissionId" element={<ExamResult />} />
@@ -95,6 +100,7 @@ function App() {
                 <Route path="videos" element={<VideoLibrary />} />
                 <Route path="background-settings" element={<BackgroundSettings />} />
                 <Route path="store" element={<AdminStore />} />
+                <Route path="pig-game" element={<AdminPigGame />} />
               </Route>
 
               {/* Catch all */}

@@ -185,6 +185,28 @@ export const getAvailableStoreItems = async () => {
 };
 
 /**
+ * Get the pig food store item (category 'pig-food', not discontinued)
+ * Giá đồ ăn heo do admin đặt tại Quản lý Cửa Hàng
+ * @returns {Promise<Object|null>} - Pig food item or null
+ */
+export const getPigFoodItem = async () => {
+    try {
+        const q = query(
+            collection(db, 'storeItems'),
+            where('category', '==', 'pig-food')
+        );
+        const snapshot = await getDocs(q);
+        const items = snapshot.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(item => !item.discontinued);
+        return items[0] || null;
+    } catch (error) {
+        console.error('Error getting pig food item:', error);
+        return null;
+    }
+};
+
+/**
  * Get a single store item by ID
  * @param {string} itemId - Item ID
  * @returns {Promise<Object>} - Item data

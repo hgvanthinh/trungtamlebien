@@ -34,6 +34,26 @@ export const processFileForExam = async (file, onProgress) => {
 };
 
 /**
+ * Compress image for store item (ảnh món hàng chỉ hiển thị card nhỏ → nén mạnh)
+ * Max 800px, mục tiêu < 0.4MB. Trả về file gốc nếu nén thất bại (không chặn upload).
+ * @param {File} file - Image file
+ * @returns {Promise<File>} - Compressed file
+ */
+export const compressStoreImage = async (file) => {
+  try {
+    return await imageCompression(file, {
+      maxSizeMB: 0.4,
+      maxWidthOrHeight: 800,
+      useWebWorker: true,
+      initialQuality: 0.8,
+    });
+  } catch (error) {
+    console.error('Store image compression failed, dùng ảnh gốc:', error);
+    return file;
+  }
+};
+
+/**
  * Compress image for exam (quality 60-70%, max 10MB)
  * @param {File} file - Image file
  * @param {Function} onProgress - Progress callback

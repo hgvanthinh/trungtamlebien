@@ -100,7 +100,7 @@ const ExamBank = () => {
     }
   };
 
-  const confirmAssignExam = async (classId, deadline) => {
+  const confirmAssignExam = async (classId, deadline, options = {}) => {
     if (!examToAssign) return;
 
     const result = await assignExamToClass({
@@ -109,6 +109,8 @@ const ExamBank = () => {
       examType: examToAssign.type,
       classId: classId,
       deadline: deadline,
+      startTime: options.startTime || null,
+      isPigTeaching: options.isPigTeaching || false,
       assignedBy: currentUser.uid,
     });
 

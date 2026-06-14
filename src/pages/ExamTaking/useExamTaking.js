@@ -11,6 +11,9 @@ import {
   submitMultipleChoiceExam,
   submitMixedExam,
 } from '../../services/examBankService';
+import { getAssignmentById } from '../../services/assignmentService';
+import { awardExamXp } from '../../services/pigService';
+import { getPigGameSettings } from '../../services/gameSettingsService';
 
 export const useExamTaking = (examId, assignmentId, currentUser, userProfile, navigate) => {
   const [exam, setExam] = useState(null);
@@ -35,6 +38,34 @@ export const useExamTaking = (examId, assignmentId, currentUser, userProfile, na
 
   const timerRef = useRef(null);
   const startTimeRef = useRef(Date.now());
+  const assignmentRef = useRef(null); // assignment hiện tại (check "Dạy heo học")
+
+  // Cộng XP cho heo nếu là đề "Dạy heo học" nộp trong khung giờ.
+  // Fire-and-safe: lỗi không được chặn luồng nộp bài.
+  const tryAwardPigXp = async (subId, totalScore, maxScore) => {
+    try {
+      const assignment = assignmentRef.current;
+      if (!assignment?.isPigTeaching || !subId) return '';
+      const settings = await getPigGameSettings();
+      const result = await awardExamXp(
+        currentUser.uid,
+        userProfile?.fullName || '',
+        subId,
+        { totalScore, maxScore },
+        assignment,
+        settings
+      );
+      if (result.awarded) {
+        return result.leveledUp
+          ? ` 🐷 Heo +${result.xpGained} XP và lên CẤP ${result.newLevel}!`
+          : ` 🐷 Heo của bạn +${result.xpGained} XP!`;
+      }
+      return '';
+    } catch (error) {
+      console.error('Pig XP award error:', error);
+      return '';
+    }
+  };
 
   useEffect(() => {
     loadExam();
@@ -69,6 +100,13 @@ export const useExamTaking = (examId, assignmentId, currentUser, userProfile, na
 
     const examData = examResult.exam;
     setExam(examData);
+
+    // Load assignment để biết có phải đề "Dạy heo học" không
+    if (assignmentId && !assignmentRef.current) {
+      getAssignmentById(assignmentId)
+        .then(a => { assignmentRef.current = a; })
+        .catch(() => { });
+    }
 
     // Upload type hoặc multiple_choice - just show PDF/image
     if (examData.type === 'upload' || examData.type === 'multiple_choice' || examData.type === 'mixed_exam') {
@@ -159,11 +197,12 @@ export const useExamTaking = (examId, assignmentId, currentUser, userProfile, na
     const result = await submitExam(submissionId, duration);
 
     if (result.success) {
+      const pigMsg = await tryAwardPigXp(submissionId, result.autoGradedScore, result.maxScore);
       setToast({
-        message: `Đã nộp bài! Điểm: ${result.autoGradedScore}/${result.maxScore}`,
+        message: `Đã nộp bài! Điểm: ${result.autoGradedScore}/${result.maxScore}${pigMsg}`,
         type: 'success'
       });
-      setTimeout(() => navigate('/exams'), 1500);
+      setTimeout(() => navigate('/exams'), pigMsg ? 2500 : 1500);
     } else {
       setToast({
         message: result.error,
@@ -248,11 +287,12 @@ export const useExamTaking = (examId, assignmentId, currentUser, userProfile, na
     );
 
     if (result.success) {
+      const pigMsg = await tryAwardPigXp(result.submissionId, result.score, result.maxScore);
       setToast({
-        message: `Nộp bài thành công! Điểm: ${result.correctCount}/${result.totalQuestions} câu đúng`,
+        message: `Nộp bài thành công! Điểm: ${result.correctCount}/${result.totalQuestions} câu đúng${pigMsg}`,
         type: 'success'
       });
-      setTimeout(() => navigate('/exams'), 2000);
+      setTimeout(() => navigate('/exams'), pigMsg ? 2500 : 2000);
     } else {
       setToast({
         message: 'Lỗi: ' + result.error,
@@ -304,10 +344,11 @@ export const useExamTaking = (examId, assignmentId, currentUser, userProfile, na
     });
 
     if (result.success) {
-      setToast({ type: 'success', message: 'Nộp bài thành công!' });
+      const pigMsg = await tryAwardPigXp(result.submissionId, result.totalScore, result.maxScore);
+      setToast({ type: 'success', message: `Nộp bài thành công!${pigMsg}` });
       setTimeout(() => {
         navigate(`/exam-result/${result.submissionId}`);
-      }, 1500);
+      }, pigMsg ? 2500 : 1500);
     } else {
       setToast({ type: 'error', message: 'Lỗi: ' + result.error });
     }

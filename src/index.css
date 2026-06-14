@@ -113,6 +113,41 @@
   /* Chrome, Safari and Opera */
 }
 
+/* Heo chạy cạnh tên HS (game Heo Đất) */
+@keyframes pig-run {
+  0% {
+    transform: translateX(0) translateY(0) scaleX(1);
+  }
+
+  20% {
+    transform: translateX(3px) translateY(-2px) scaleX(1);
+  }
+
+  45% {
+    transform: translateX(6px) translateY(0) scaleX(1);
+  }
+
+  50% {
+    transform: translateX(6px) translateY(0) scaleX(-1);
+  }
+
+  70% {
+    transform: translateX(3px) translateY(-2px) scaleX(-1);
+  }
+
+  95% {
+    transform: translateX(0) translateY(0) scaleX(-1);
+  }
+
+  100% {
+    transform: translateX(0) translateY(0) scaleX(1);
+  }
+}
+
+.animate-pig-run {
+  animation: pig-run 1.6s ease-in-out infinite;
+}
+
 /* Slide-up animation for mobile modal */
 @keyframes slide-up {
   from {

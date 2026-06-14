@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getAvailableStoreItems } from '../services/storeService';
 import { purchaseItem, userOwnsItem } from '../services/inventoryService';
+import { buyFood } from '../services/pigService';
 import { useNavigate } from 'react-router-dom';
 import CoinIcon from '../components/common/CoinIcon';
 import GoldIcon from '../components/common/GoldIcon';
@@ -28,10 +29,11 @@ export default function Store() {
             const data = await getAvailableStoreItems();
             setItems(data);
 
-            // Check which items user already owns
+            // Check which items user already owns (đồ ăn heo là hàng tiêu hao, mua lại được)
             if (currentUser) {
                 const owned = new Set();
                 for (const item of data) {
+                    if (item.category === 'pig-food') continue;
                     const owns = await userOwnsItem(currentUser.uid, item.id);
                     if (owns) {
                         owned.add(item.id);
@@ -53,19 +55,20 @@ export default function Store() {
             return;
         }
 
-        // Check if user already owns this item
-        if (ownedItems.has(item.id)) {
+        // Check if user already owns this item (đồ ăn heo mua lại thoải mái)
+        if (item.category !== 'pig-food' && ownedItems.has(item.id)) {
             setToast({ type: 'info', message: 'Bạn đã sở hữu món hàng này rồi!' });
             return;
         }
 
-        // Check if user has enough currency
-        const userCurrency = item.currency === 'coins'
+        // Check if user has enough currency (đồ ăn heo luôn tính bằng Xu)
+        const isPigFood = item.category === 'pig-food';
+        const userCurrency = (isPigFood || item.currency === 'coins')
             ? (userProfile?.coins || 0)
             : (userProfile?.gold || 0);
 
         if (userCurrency < item.price) {
-            const currencyName = item.currency === 'coins' ? 'Xu' : 'Đồng Vàng';
+            const currencyName = (isPigFood || item.currency === 'coins') ? 'Xu' : 'Đồng Vàng';
             setToast({ type: 'error', message: `Bạn không đủ ${currencyName} để mua món hàng này!` });
             return;
         }
@@ -73,16 +76,33 @@ export default function Store() {
         // Show confirmation modal
         setConfirmModal({
             item,
-            message: `Bạn có chắc muốn mua "${item.name}" với giá ${item.price} ${item.currency === 'coins' ? 'Xu' : 'Đồng Vàng'}?`
+            quantity: 1,
+            message: isPigFood
+                ? null
+                : `Bạn có chắc muốn mua "${item.name}" với giá ${item.price} ${item.currency === 'coins' ? 'Xu' : 'Đồng Vàng'}?`
         });
     };
 
     const confirmPurchase = async () => {
         const item = confirmModal.item;
+        const quantity = confirmModal.quantity || 1;
         setConfirmModal(null);
 
         try {
             setPurchasing(true);
+
+            if (item.category === 'pig-food') {
+                // Đồ ăn heo: trừ Xu, cộng thẳng vào heo (không vào kho hàng)
+                const result = await buyFood(
+                    currentUser.uid,
+                    userProfile?.fullName || '',
+                    quantity,
+                    item.price
+                );
+                updateUserProfile({ coins: result.newCoins });
+                setToast({ type: 'success', message: `🌽 Đã mua ${quantity} thức ăn cho heo! Heo của bạn có ${result.newFood} đồ ăn.` });
+                return;
+            }
 
             const result = await purchaseItem(currentUser.uid, item.id, {
                 name: item.name,
@@ -254,7 +274,7 @@ export default function Store() {
                                     {/* Category Badge */}
                                     <div className="mb-2">
                                         <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-md text-xs font-semibold">
-                                            🖼️ Viền Avatar
+                                            {item.category === 'pig-food' ? '🌽 Thức ăn heo' : '🖼️ Viền Avatar'}
                                         </span>
                                         {item.discontinued && (
                                             <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 rounded-md text-xs font-semibold ml-2">
@@ -333,9 +353,36 @@ export default function Store() {
                         <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
                             Xác nhận mua hàng
                         </h3>
-                        <p className="text-gray-600 dark:text-gray-300 mb-6">
-                            {confirmModal.message}
-                        </p>
+                        {confirmModal.item.category === 'pig-food' ? (
+                            <div className="mb-6">
+                                <p className="text-gray-600 dark:text-gray-300 mb-4">
+                                    Mua thức ăn cho heo "{confirmModal.item.name}" — giá {confirmModal.item.price} Xu/cái
+                                </p>
+                                <div className="flex items-center justify-center gap-4">
+                                    <button
+                                        onClick={() => setConfirmModal(m => ({ ...m, quantity: Math.max(1, (m.quantity || 1) - 1) }))}
+                                        className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 font-bold text-xl text-gray-700 dark:text-gray-200 hover:bg-gray-300"
+                                    >−</button>
+                                    <span className="text-2xl font-bold text-gray-900 dark:text-white w-12 text-center">
+                                        {confirmModal.quantity || 1}
+                                    </span>
+                                    <button
+                                        onClick={() => setConfirmModal(m => ({ ...m, quantity: Math.min(99, (m.quantity || 1) + 1) }))}
+                                        className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 font-bold text-xl text-gray-700 dark:text-gray-200 hover:bg-gray-300"
+                                    >+</button>
+                                </div>
+                                <p className="text-center mt-3 font-semibold text-gray-900 dark:text-white">
+                                    Tổng: {(confirmModal.quantity || 1) * confirmModal.item.price} Xu
+                                    {(confirmModal.quantity || 1) * confirmModal.item.price > (userProfile?.coins || 0) && (
+                                        <span className="text-red-500 text-sm block">Không đủ Xu!</span>
+                                    )}
+                                </p>
+                            </div>
+                        ) : (
+                            <p className="text-gray-600 dark:text-gray-300 mb-6">
+                                {confirmModal.message}
+                            </p>
+                        )}
                         <div className="flex gap-3">
                             <button
                                 onClick={() => setConfirmModal(null)}
@@ -345,7 +392,9 @@ export default function Store() {
                             </button>
                             <button
                                 onClick={confirmPurchase}
-                                disabled={purchasing}
+                                disabled={purchasing
+                                    || (confirmModal.item.category === 'pig-food'
+                                        && (confirmModal.quantity || 1) * confirmModal.item.price > (userProfile?.coins || 0))}
                                 className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors disabled:opacity-50"
                             >
                                 {purchasing ? 'Đang xử lý...' : 'Xác nhận'}
