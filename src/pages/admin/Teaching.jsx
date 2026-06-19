@@ -9,6 +9,7 @@ import Button from '../../components/common/Button';
 import Icon from '../../components/common/Icon';
 import Toast from '../../components/common/Toast';
 import Avatar from '../../components/common/Avatar';
+import RunningPigBadge from '../../components/common/RunningPigBadge';
 
 
 // Import subcomponents and hooks
@@ -258,7 +259,10 @@ if (gradeResult.success) setGradeLeaderboard(gradeResult.leaderboard);
                                             <Avatar src={student.avatar} name={student.fullName} size="sm" borderUrl={student.activeAvatarBorder} />
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <div className="font-bold text-[#111812] dark:text-white text-xs break-words">{student.fullName}</div>
+                                            <div className="font-bold text-[#111812] dark:text-white text-xs break-words">
+                                                {student.fullName}
+                                                <RunningPigBadge level={student.pigLevel} static scale={2} />
+                                            </div>
                                             <div className="flex items-center gap-1.5 text-[14px]">
                                                 <span className="text-fuchsia-800 dark:text-fuchsia-500 font-bold">
                                                     {student.studyPoints == null || student.studyPoints === 'Vắng' || typeof student.studyPoints !== 'number' ? (student.studyPoints === 'Vắng' ? 'Vắng' : '') : student.studyPoints.toFixed(2) + ' điểm'}
@@ -301,6 +305,7 @@ if (gradeResult.success) setGradeLeaderboard(gradeResult.leaderboard);
                                                 <h3 className={`text-xl font-black truncate ${getNameColorClass(student.uid)}`}>
                                                     <span className="text-[#608a67] dark:text-[#8ba890] mr-2">{index + 1}.</span>
                                                     {student.fullName}
+                                                    <RunningPigBadge level={student.pigLevel} static scale={2} />
                                                 </h3>
                                                 <div className="flex items-center gap-3 mt-1 text-base">
                                                     <span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1" style={{ textShadow: '0 0 8px rgba(220, 38, 38, 0.5)' }}>

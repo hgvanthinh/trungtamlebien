@@ -8,6 +8,7 @@ import Avatar from '../common/Avatar';
 
 const EditStudentModal = ({ student, onClose, onSuccess }) => {
     const [fullName, setFullName] = useState(student.fullName);
+    const [parentPhone, setParentPhone] = useState(student.parentPhone || '');
     const [isLoading, setIsLoading] = useState(false);
     const [isDeletingAvatar, setIsDeletingAvatar] = useState(false);
 
@@ -17,14 +18,20 @@ const EditStudentModal = ({ student, onClose, onSuccess }) => {
             return;
         }
 
+        if (parentPhone.trim() && !/^[0-9]{9,11}$/.test(parentPhone.trim())) {
+            alert('Số điện thoại không hợp lệ');
+            return;
+        }
+
         setIsLoading(true);
         try {
             const userRef = doc(db, 'users', student.uid);
             await updateDoc(userRef, {
                 fullName: fullName.trim(),
+                parentPhone: parentPhone.trim(),
             });
 
-            onSuccess('Đã cập nhật họ tên!');
+            onSuccess('Đã cập nhật thông tin!');
             onClose();
         } catch (error) {
             console.error('Error updating name:', error);
@@ -133,6 +140,20 @@ const EditStudentModal = ({ student, onClose, onSuccess }) => {
                             placeholder="Nhập họ và tên"
                             disabled={isLoading || isDeletingAvatar}
                             autoFocus
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Số điện thoại phụ huynh
+                        </label>
+                        <input
+                            type="tel"
+                            value={parentPhone}
+                            onChange={(e) => setParentPhone(e.target.value)}
+                            className="clay-input w-full px-4 py-3 rounded-xl border-none focus:outline-none focus:ring-2 focus:ring-primary text-gray-800 dark:text-white"
+                            placeholder="Nhập số điện thoại phụ huynh"
+                            disabled={isLoading || isDeletingAvatar}
                         />
                     </div>
 

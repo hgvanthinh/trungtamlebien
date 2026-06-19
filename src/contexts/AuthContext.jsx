@@ -19,7 +19,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   // Đăng ký học sinh - tự động chuyển username thành email
-  const registerStudent = async (username, password, fullName) => {
+  const registerStudent = async (username, password, fullName, parentPhone = '') => {
     try {
       // Chuyển username thành email (vd: "hocsinh" -> "hocsinh@thaybien.com")
       const email = `${username}@thaybien.com`;
@@ -33,6 +33,7 @@ export const AuthProvider = ({ children }) => {
         username: username,
         email: email,
         fullName: fullName,
+        parentPhone: parentPhone,
         role: 'student',
         avatar: '',
         classes: [], // Danh sách lớp học (admin sẽ gán sau)

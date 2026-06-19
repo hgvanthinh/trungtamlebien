@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { getAvailableStoreItems } from '../services/storeService';
+import { getAvailableStoreItems, getStoreCategories } from '../services/storeService';
 import { purchaseItem, userOwnsItem } from '../services/inventoryService';
 import { buyFood } from '../services/pigService';
 import { useNavigate } from 'react-router-dom';
@@ -12,16 +12,25 @@ export default function Store() {
     const { userProfile, currentUser, updateUserProfile } = useAuth();
     const navigate = useNavigate();
     const [items, setItems] = useState([]);
+    const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(true);
     const [purchasing, setPurchasing] = useState(false);
     const [filterCurrency, setFilterCurrency] = useState('all'); // 'all', 'coins', 'gold'
+    const [filterCategory, setFilterCategory] = useState('all');
     const [ownedItems, setOwnedItems] = useState(new Set());
     const [toast, setToast] = useState(null);
     const [confirmModal, setConfirmModal] = useState(null);
+    const [detailModal, setDetailModal] = useState(null);
 
     useEffect(() => {
         loadItems();
+        getStoreCategories().then(setCategories).catch(err => console.error('Error loading categories:', err));
     }, []);
+
+    const getCategoryLabel = (key) => {
+        const cat = categories.find(c => c.key === key);
+        return cat ? `${cat.emoji} ${cat.label}` : key;
+    };
 
     const loadItems = async () => {
         try {
@@ -132,8 +141,9 @@ export default function Store() {
     };
 
     const filteredItems = items.filter(item => {
-        if (filterCurrency === 'all') return true;
-        return item.currency === filterCurrency;
+        if (filterCurrency !== 'all' && item.currency !== filterCurrency) return false;
+        if (filterCategory !== 'all' && item.category !== filterCategory) return false;
+        return true;
     });
 
     if (loading) {
@@ -190,7 +200,7 @@ export default function Store() {
             </div>
 
             {/* Filter */}
-            <div className="flex gap-3 mb-6">
+            <div className="flex flex-wrap items-center gap-3 mb-6">
                 <button
                     onClick={() => setFilterCurrency('all')}
                     className={`px-6 py-2 rounded-lg font-semibold transition-colors ${filterCurrency === 'all'
@@ -220,6 +230,21 @@ export default function Store() {
                     <GoldIcon size={16} />
                     Đồng Vàng
                 </button>
+
+                <select
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value)}
+                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                  bg-white dark:bg-gray-700 text-gray-900 dark:text-white font-semibold
+                  focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                    <option value="all">Tất cả loại hàng</option>
+                    {categories.map((cat) => (
+                        <option key={cat.key} value={cat.key}>
+                            {cat.emoji} {cat.label}
+                        </option>
+                    ))}
+                </select>
             </div>
 
             {/* Items Grid */}
@@ -231,7 +256,7 @@ export default function Store() {
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
                     {filteredItems.map((item) => {
                         const owned = ownedItems.has(item.id);
                         const canAfford = item.currency === 'coins'
@@ -241,7 +266,7 @@ export default function Store() {
                         return (
                             <div
                                 key={item.id}
-                                className={`bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-all ${owned ? 'opacity-75' : ''
+                                className={`bg-white dark:bg-gray-800 rounded-lg shadow hover:shadow-lg overflow-hidden transition-all ${owned ? 'opacity-75' : ''
                                     }`}
                             >
                                 {/* Item Image */}
@@ -254,95 +279,155 @@ export default function Store() {
                                         />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center">
-                                            <div className="text-6xl text-gray-400">🖼️</div>
+                                            <div className="text-3xl text-gray-400">🖼️</div>
                                         </div>
                                     )}
                                     {owned && (
-                                        <div className="absolute top-2 right-2 bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-1">
-                                            <span className="text-sm">✓</span>
+                                        <div className="absolute top-1 right-1 bg-green-500 text-white px-2 py-0.5 rounded-full text-[10px] font-semibold flex items-center gap-1">
+                                            <span>✓</span>
                                             Đã sở hữu
                                         </div>
                                     )}
                                 </div>
 
                                 {/* Item Info */}
-                                <div className="p-4">
-                                    <h3 className="font-bold text-lg text-gray-900 dark:text-white mb-2 truncate">
+                                <div className="p-2">
+                                    <h3 className="font-bold text-sm text-gray-900 dark:text-white mb-1 truncate">
                                         {item.name}
                                     </h3>
 
                                     {/* Category Badge */}
-                                    <div className="mb-2">
-                                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-md text-xs font-semibold">
-                                            {item.category === 'pig-food' ? '🌽 Thức ăn heo' : '🖼️ Viền Avatar'}
+                                    <div className="mb-1 flex flex-wrap gap-1">
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded text-[10px] font-semibold">
+                                            {getCategoryLabel(item.category)}
                                         </span>
                                         {item.discontinued && (
-                                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 rounded-md text-xs font-semibold ml-2">
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 rounded text-[10px] font-semibold">
                                                 🚫 Ngưng bán
                                             </span>
                                         )}
                                     </div>
 
                                     {/* Price */}
-                                    <div className="flex items-center gap-2 mb-4">
+                                    <div className="flex items-center gap-1 mb-2">
                                         {item.currency === 'coins' ? (
                                             <>
-                                                <CoinIcon size={20} />
-                                                <span className={`font-bold text-lg ${canAfford ? 'text-gray-900 dark:text-white' : 'text-red-500'
+                                                <CoinIcon size={14} />
+                                                <span className={`font-bold text-sm ${canAfford ? 'text-gray-900 dark:text-white' : 'text-red-500'
                                                     }`}>
                                                     {item.price} Xu
                                                 </span>
                                             </>
-                                        ) : (
+                                        ) : item.currency === 'gold' ? (
                                             <>
-                                                <GoldIcon size={20} />
-                                                <span className={`font-bold text-lg ${canAfford ? 'text-gray-900 dark:text-white' : 'text-red-500'
+                                                <GoldIcon size={14} />
+                                                <span className={`font-bold text-sm ${canAfford ? 'text-gray-900 dark:text-white' : 'text-red-500'
                                                     }`}>
                                                     {item.price} Đồng Vàng
+                                                </span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span className="text-sm">💵</span>
+                                                <span className="font-bold text-sm text-gray-900 dark:text-white">
+                                                    {Number(item.price).toLocaleString('vi-VN')} VNĐ
                                                 </span>
                                             </>
                                         )}
                                     </div>
 
                                     {/* Purchase Button */}
-                                    <button
-                                        onClick={() => handlePurchase(item)}
-                                        disabled={purchasing || owned || !canAfford || (item.discontinued && !owned)}
-                                        className={`w-full px-4 py-3 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 ${owned
-                                            ? 'bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-400 cursor-not-allowed'
-                                            : (item.discontinued && !owned)
-                                                ? 'bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-400 cursor-not-allowed'
-                                                : !canAfford
-                                                    ? 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400 cursor-not-allowed'
-                                                    : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white transform hover:scale-105'
-                                            }`}
-                                    >
-                                        {owned ? (
-                                            <>
-                                                <span className="text-sm">✓</span>
-                                                Đã mua
-                                            </>
-                                        ) : (item.discontinued && !owned) ? (
-                                            <>
-                                                <span className="text-sm">🚫</span>
-                                                Ngưng bán
-                                            </>
-                                        ) : !canAfford ? (
-                                            <>
-                                                <span className="text-sm">🚫</span>
-                                                Không đủ tiền
-                                            </>
-                                        ) : (
-                                            <>
-                                                <span className="text-sm">🛒</span>
-                                                Mua ngay
-                                            </>
-                                        )}
-                                    </button>
+                                    {item.purchaseType === 'offline' ? (
+                                        <button
+                                            onClick={() => setDetailModal(item)}
+                                            className="w-full px-2 py-1.5 rounded text-xs font-semibold transition-all flex items-center justify-center gap-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
+                                        >
+                                            👁️ Xem chi tiết
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={() => handlePurchase(item)}
+                                            disabled={purchasing || owned || !canAfford || (item.discontinued && !owned)}
+                                            className={`w-full px-2 py-1.5 rounded text-xs font-semibold transition-all flex items-center justify-center gap-1 ${owned
+                                                ? 'bg-gray-300 dark:bg-gray-600 text-gray-600 dark:text-gray-400 cursor-not-allowed'
+                                                : (item.discontinued && !owned)
+                                                    ? 'bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-400 cursor-not-allowed'
+                                                    : !canAfford
+                                                        ? 'bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400 cursor-not-allowed'
+                                                        : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white'
+                                                }`}
+                                        >
+                                            {owned ? (
+                                                <>✓ Đã mua</>
+                                            ) : (item.discontinued && !owned) ? (
+                                                <>🚫 Ngưng bán</>
+                                            ) : !canAfford ? (
+                                                <>🚫 Không đủ tiền</>
+                                            ) : (
+                                                <>🛒 Mua ngay</>
+                                            )}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         );
                     })}
+                </div>
+            )}
+
+            {/* Detail Modal (hàng mua trực tiếp) */}
+            {detailModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6">
+                        {detailModal.imageUrl && (
+                            <img
+                                src={detailModal.imageUrl}
+                                alt={detailModal.name}
+                                className="w-full aspect-square object-cover rounded-lg mb-4"
+                            />
+                        )}
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                            {detailModal.name}
+                        </h3>
+                        {detailModal.description && (
+                            <p className="text-gray-600 dark:text-gray-300 mb-3">
+                                {detailModal.description}
+                            </p>
+                        )}
+                        <div className="flex items-center gap-2 mb-4">
+                            {detailModal.currency === 'coins' ? (
+                                <>
+                                    <CoinIcon size={20} />
+                                    <span className="font-bold text-lg text-gray-900 dark:text-white">
+                                        {detailModal.price} Xu
+                                    </span>
+                                </>
+                            ) : detailModal.currency === 'gold' ? (
+                                <>
+                                    <GoldIcon size={20} />
+                                    <span className="font-bold text-lg text-gray-900 dark:text-white">
+                                        {detailModal.price} Đồng Vàng
+                                    </span>
+                                </>
+                            ) : (
+                                <>
+                                    <span className="text-xl">💵</span>
+                                    <span className="font-bold text-lg text-gray-900 dark:text-white">
+                                        {Number(detailModal.price).toLocaleString('vi-VN')} VNĐ
+                                    </span>
+                                </>
+                            )}
+                        </div>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                            🤝 Món hàng này chỉ mua trực tiếp. Hãy đến gặp giáo viên/admin để mua món hàng này.
+                        </p>
+                        <button
+                            onClick={() => setDetailModal(null)}
+                            className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors"
+                        >
+                            Đóng
+                        </button>
+                    </div>
                 </div>
             )}
 

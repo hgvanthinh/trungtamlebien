@@ -59,6 +59,7 @@ const Layout = () => {
     class: classNames.length > 0 ? classNames.join(', ') : null,
     avatar: userProfile.avatar || '',
     activeAvatarBorder: userProfile.activeAvatarBorder || null,
+    pigLevel: userProfile.pigLevel || 0,
   } : null;
 
   // Hiển thị hình nền nếu: Admin HOẶC (Học sinh VÀ admin đã bật applyToStudents)

@@ -17,11 +17,21 @@ const Profile = () => {
   const [classes, setClasses] = useState([]);
   const [formData, setFormData] = useState({
     fullName: userProfile?.fullName || '',
+    parentPhone: userProfile?.parentPhone || '',
   });
 
   useEffect(() => {
     loadClasses();
   }, [userProfile]);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setFormData({
+        fullName: userProfile?.fullName || '',
+        parentPhone: userProfile?.parentPhone || '',
+      });
+    }
+  }, [userProfile, isEditing]);
 
   const loadClasses = async () => {
     if (userProfile?.classes && userProfile.classes.length > 0) {
@@ -77,8 +87,14 @@ const Profile = () => {
       return;
     }
 
+    if (formData.parentPhone.trim() && !/^[0-9]{9,11}$/.test(formData.parentPhone.trim())) {
+      setToast({ type: 'error', message: 'Số điện thoại không hợp lệ' });
+      return;
+    }
+
     const result = await updateProfile({
       fullName: formData.fullName,
+      parentPhone: formData.parentPhone.trim(),
     });
 
     if (result.success) {
@@ -92,6 +108,7 @@ const Profile = () => {
   const handleCancelEdit = () => {
     setFormData({
       fullName: userProfile?.fullName || '',
+      parentPhone: userProfile?.parentPhone || '',
     });
     setIsEditing(false);
   };
@@ -188,6 +205,30 @@ const Profile = () => {
                       <Icon name="badge" className="text-gray-500" />
                       <span className="text-gray-800 dark:text-gray-200">
                         {userProfile.fullName}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Parent Phone */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Số điện thoại phụ huynh
+                  </label>
+                  {isEditing ? (
+                    <input
+                      type="tel"
+                      name="parentPhone"
+                      value={formData.parentPhone}
+                      onChange={handleInputChange}
+                      placeholder="Nhập số điện thoại phụ huynh"
+                      className="clay-input w-full px-4 py-3 rounded-xl border-none focus:outline-none focus:ring-2 focus:ring-primary text-gray-800 dark:text-white"
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2 p-3 bg-gray-100 dark:bg-gray-800 rounded-xl">
+                      <Icon name="call" className="text-gray-500" />
+                      <span className="text-gray-800 dark:text-gray-200">
+                        {userProfile.parentPhone || 'Chưa cập nhật'}
                       </span>
                     </div>
                   )}

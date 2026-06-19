@@ -194,6 +194,15 @@ service cloud.firestore {
       allow read: if isAuthenticated();
     }
 
+    // Collection: storeCategories (loại hàng tùy chỉnh trong Cửa Hàng)
+    match /storeCategories/{categoryId} {
+      // Admin có toàn quyền
+      allow read, write: if isAdmin();
+
+      // Học sinh được xem để hiển thị nhãn loại hàng
+      allow read: if isAuthenticated();
+    }
+
     // Collection: inventories (kho đồ đã mua của học sinh)
     match /inventories/{inventoryId} {
       // Admin có toàn quyền

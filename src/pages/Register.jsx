@@ -13,6 +13,7 @@ const Register = () => {
     password: '',
     confirmPassword: '',
     fullName: '',
+    parentPhone: '',
   });
 
   const [errors, setErrors] = useState({});
@@ -55,6 +56,12 @@ const Register = () => {
       newErrors.fullName = 'Vui lòng nhập họ và tên';
     }
 
+    if (!formData.parentPhone.trim()) {
+      newErrors.parentPhone = 'Vui lòng nhập số điện thoại phụ huynh';
+    } else if (!/^[0-9]{9,11}$/.test(formData.parentPhone.trim())) {
+      newErrors.parentPhone = 'Số điện thoại không hợp lệ';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -69,7 +76,8 @@ const Register = () => {
     const result = await registerStudent(
       formData.username,
       formData.password,
-      formData.fullName
+      formData.fullName,
+      formData.parentPhone.trim()
     );
 
     setIsLoading(false);
@@ -145,6 +153,30 @@ const Register = () => {
               </div>
               {errors.fullName && (
                 <p className="text-red-500 text-sm mt-1">{errors.fullName}</p>
+              )}
+            </div>
+
+            {/* Parent Phone */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Số điện thoại phụ huynh
+              </label>
+              <div className="relative">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                  <Icon name="call" />
+                </div>
+                <input
+                  type="tel"
+                  name="parentPhone"
+                  value={formData.parentPhone}
+                  onChange={handleChange}
+                  className="clay-input w-full pl-10 pr-4 py-3 rounded-xl border-none focus:outline-none focus:ring-2 focus:ring-primary text-gray-800 dark:text-white"
+                  placeholder="0901234567"
+                  disabled={isLoading}
+                />
+              </div>
+              {errors.parentPhone && (
+                <p className="text-red-500 text-sm mt-1">{errors.parentPhone}</p>
               )}
             </div>
 

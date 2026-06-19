@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import Icon from '../common/Icon';
 import Avatar from '../common/Avatar';
+import RunningPigBadge from '../common/RunningPigBadge';
 import { useAuth } from '../../contexts/AuthContext';
 
 const Sidebar = ({ user, onLogout, onMenuItemClick }) => {
@@ -59,6 +60,7 @@ const Sidebar = ({ user, onLogout, onMenuItemClick }) => {
             <div className="flex flex-col">
               <h1 className="text-[#111812] dark:text-white text-lg font-bold leading-tight">
                 {user?.name || 'Nguyễn Văn A'}
+                {!isAdmin && <RunningPigBadge level={user?.pigLevel} />}
               </h1>
               <p className="text-[#608a67] dark:text-[#8ba890] text-sm font-medium">
                 {isAdmin ? 'Quản trị viên' : (user?.class || 'Chưa phân lớp')}

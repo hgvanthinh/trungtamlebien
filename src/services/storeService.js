@@ -207,6 +207,39 @@ export const getPigFoodItem = async () => {
 };
 
 /**
+ * Get all store categories (built-in + custom)
+ * @returns {Promise<Array>} - Array of { key, label, emoji }
+ */
+export const getStoreCategories = async () => {
+    try {
+        const snapshot = await getDocs(collection(db, 'storeCategories'));
+        const custom = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        return [
+            { key: 'avatar-border', label: 'Viền Avatar', emoji: '🖼️' },
+            { key: 'pig-food', label: 'Thức ăn heo (game Heo Đất)', emoji: '🌽' },
+            ...custom
+        ];
+    } catch (error) {
+        console.error('Error getting store categories:', error);
+        throw error;
+    }
+};
+
+/**
+ * Create a new custom store category
+ * @param {Object} categoryData - { key, label, emoji }
+ */
+export const createStoreCategory = async (categoryData) => {
+    try {
+        const docRef = await addDoc(collection(db, 'storeCategories'), categoryData);
+        return { id: docRef.id, ...categoryData };
+    } catch (error) {
+        console.error('Error creating store category:', error);
+        throw error;
+    }
+};
+
+/**
  * Get a single store item by ID
  * @param {string} itemId - Item ID
  * @returns {Promise<Object>} - Item data

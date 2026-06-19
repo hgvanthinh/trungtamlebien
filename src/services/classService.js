@@ -512,18 +512,23 @@ export const resetViolations = async (studentUids) => {
 };
 
 /**
- * Cập nhật tên hiển thị tùy chỉnh cho lớp học
+ * Cập nhật tên hiển thị tùy chỉnh (và khối) cho lớp học
  * @param {string} classId - ID lớp học
  * @param {string|null} displayName - Tên hiển thị mới (null để xóa về tên gốc)
+ * @param {number|string|null} grade - Khối mới (null/undefined để giữ nguyên)
  */
-export const updateClassDisplayName = async (classId, displayName) => {
+export const updateClassDisplayName = async (classId, displayName, grade = undefined) => {
   try {
     checkAdminPermission();
     const classRef = doc(db, 'classes', classId);
-    await updateDoc(classRef, {
+    const updateData = {
       displayName: displayName || null,
       updatedAt: serverTimestamp(),
-    });
+    };
+    if (grade !== undefined && grade !== null && grade !== '') {
+      updateData.grade = parseInt(grade, 10);
+    }
+    await updateDoc(classRef, updateData);
     return { success: true };
   } catch (error) {
     console.error('Error updating class display name:', error);

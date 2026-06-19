@@ -326,7 +326,10 @@ const Students = () => {
   const getStudentClasses = (student) => {
     if (!student.classes || student.classes.length === 0) return 'Chưa phân lớp';
     const names = student.classes
-      .map((cid) => classes.find((c) => c.id === cid)?.name || '')
+      .map((cid) => {
+        const cls = classes.find((c) => c.id === cid);
+        return cls ? (cls.displayName || cls.name) : '';
+      })
       .filter(Boolean);
     return names.length > 0 ? names.join(', ') : 'Chưa phân lớp';
   };
@@ -554,6 +557,12 @@ const Students = () => {
                               </button>
                             </div>
                             <p className="text-sm text-[#608a67] dark:text-[#8ba890]">@{student.username}</p>
+                            {student.parentPhone && (
+                              <p className="text-xs text-[#608a67] dark:text-[#8ba890] flex items-center gap-1">
+                                <Icon name="call" className="text-xs" />
+                                {student.parentPhone}
+                              </p>
+                            )}
                           </div>
                         </div>
                       </td>

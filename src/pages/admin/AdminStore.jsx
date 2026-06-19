@@ -5,26 +5,40 @@ import {
     updateStoreItem,
     deleteStoreItem,
     uploadItemImage,
-    deleteItemImage
+    deleteItemImage,
+    getStoreCategories,
+    createStoreCategory
 } from '../../services/storeService';
 import { compressStoreImage } from '../../services/fileProcessingService';
 import CoinIcon from '../../components/common/CoinIcon';
 import GoldIcon from '../../components/common/GoldIcon';
 import Toast from '../../components/common/Toast';
 
+const CATEGORY_EMOJIS = [
+    '🏷️', '🛍️', '🎁', '🎨', '👑', '🎀', '⭐', '✨',
+    '🖼️', '🌽', '🍎', '🍬', '🧸', '🎮', '🎵', '📚',
+    '⚽', '🎯', '💎', '🔥', '🌟', '🏆', '🎈', '🧩'
+];
+
 export default function AdminStore() {
     const [items, setItems] = useState([]);
+    const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [toast, setToast] = useState(null);
+    const [filterCategory, setFilterCategory] = useState('all');
+    const [showAddCategory, setShowAddCategory] = useState(false);
+    const [newCategoryLabel, setNewCategoryLabel] = useState('');
+    const [newCategoryEmoji, setNewCategoryEmoji] = useState('🏷️');
 
     const [formData, setFormData] = useState({
         name: '',
         price: 0,
         currency: 'coins', // 'coins' or 'gold'
         category: 'avatar-border', // 'avatar-border'
+        purchaseType: 'online', // 'online' or 'offline'
         discontinued: false, // true = ngưng bán
         imageUrl: ''
     });
@@ -33,6 +47,7 @@ export default function AdminStore() {
 
     useEffect(() => {
         loadItems();
+        loadCategories();
     }, []);
 
     const loadItems = async () => {
@@ -45,6 +60,59 @@ export default function AdminStore() {
             setToast({ type: 'error', message: 'Lỗi khi tải danh sách món hàng' });
         } finally {
             setLoading(false);
+        }
+    };
+
+    const loadCategories = async () => {
+        try {
+            const data = await getStoreCategories();
+            setCategories(data);
+        } catch (error) {
+            console.error('Error loading categories:', error);
+            setToast({ type: 'error', message: 'Lỗi khi tải danh sách loại hàng' });
+        }
+    };
+
+    const getCategoryLabel = (key) => {
+        const cat = categories.find(c => c.key === key);
+        return cat ? `${cat.emoji} ${cat.label}` : key;
+    };
+
+    const filteredItems = filterCategory === 'all'
+        ? items
+        : items.filter(item => item.category === filterCategory);
+
+    const handleAddCategory = async (e) => {
+        e.preventDefault();
+
+        const label = newCategoryLabel.trim();
+        if (!label) {
+            setToast({ type: 'error', message: 'Vui lòng nhập tên loại hàng' });
+            return;
+        }
+
+        const key = label
+            .toLowerCase()
+            .normalize('NFD').replace(/[̀-ͯ]/g, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)/g, '');
+
+        if (categories.some(c => c.key === key)) {
+            setToast({ type: 'error', message: 'Loại hàng này đã tồn tại' });
+            return;
+        }
+
+        try {
+            const created = await createStoreCategory({ key, label, emoji: newCategoryEmoji.trim() || '🏷️' });
+            setCategories(prev => [...prev, created]);
+            setFormData(prev => ({ ...prev, category: created.key }));
+            setNewCategoryLabel('');
+            setNewCategoryEmoji('🏷️');
+            setShowAddCategory(false);
+            setToast({ type: 'success', message: 'Thêm loại hàng thành công!' });
+        } catch (error) {
+            console.error('Error adding category:', error);
+            setToast({ type: 'error', message: 'Lỗi khi thêm loại hàng' });
         }
     };
 
@@ -125,6 +193,7 @@ export default function AdminStore() {
             price: item.price,
             currency: item.currency,
             category: item.category || 'avatar-border',
+            purchaseType: item.purchaseType || 'online',
             discontinued: item.discontinued || false,
             imageUrl: item.imageUrl || ''
         });
@@ -174,6 +243,7 @@ export default function AdminStore() {
             price: 0,
             currency: 'coins',
             category: 'avatar-border',
+            purchaseType: 'online',
             discontinued: false,
             imageUrl: ''
         });
@@ -210,17 +280,47 @@ export default function AdminStore() {
                         Quản lý các món hàng trong cửa hàng
                     </p>
                 </div>
-                <button
-                    onClick={() => setShowModal(true)}
-                    className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
+                <div className="flex gap-3">
+                    <button
+                        onClick={() => setShowAddCategory(true)}
+                        className="px-6 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
+                    >
+                        <span className="text-xl">🏷️</span>
+                        Thêm Loại Hàng
+                    </button>
+                    <button
+                        onClick={() => setShowModal(true)}
+                        className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
+                    >
+                        <span className="text-xl">➕</span>
+                        Thêm Món Hàng
+                    </button>
+                </div>
+            </div>
+
+            {/* Filter by category */}
+            <div className="mb-6 flex items-center gap-3">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    Lọc theo loại hàng:
+                </label>
+                <select
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value)}
+                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                  bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                  focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                    <span className="text-xl">➕</span>
-                    Thêm Món Hàng
-                </button>
+                    <option value="all">Tất cả</option>
+                    {categories.map((cat) => (
+                        <option key={cat.key} value={cat.key}>
+                            {cat.emoji} {cat.label}
+                        </option>
+                    ))}
+                </select>
             </div>
 
             {/* Items Grid */}
-            {items.length === 0 ? (
+            {filteredItems.length === 0 ? (
                 <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-xl">
                     <div className="text-6xl mb-4">🛒</div>
                     <p className="text-gray-600 dark:text-gray-400 text-lg">
@@ -228,11 +328,11 @@ export default function AdminStore() {
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {items.map((item) => (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+                    {filteredItems.map((item) => (
                         <div
                             key={item.id}
-                            className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow"
+                            className="bg-white dark:bg-gray-800 rounded-lg shadow hover:shadow-lg overflow-hidden transition-shadow"
                         >
                             {/* Item Image */}
                             <div className="aspect-square bg-gray-100 dark:bg-gray-700 relative">
@@ -244,81 +344,79 @@ export default function AdminStore() {
                                     />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center">
-                                        <div className="text-6xl text-gray-400">🖼️</div>
+                                        <div className="text-3xl text-gray-400">🖼️</div>
                                     </div>
                                 )}
                             </div>
 
                             {/* Item Info */}
-                            <div className="p-4">
-                                <h3 className="font-bold text-lg text-gray-900 dark:text-white mb-2 truncate">
+                            <div className="p-2">
+                                <h3 className="font-bold text-sm text-gray-900 dark:text-white mb-1 truncate">
                                     {item.name}
                                 </h3>
 
                                 {/* Category Badge */}
-                                <div className="mb-2">
-                                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-md text-xs font-semibold">
-                                        {item.category === 'pig-food' ? '🌽 Thức ăn heo' : '🖼️ Viền Avatar'}
+                                <div className="mb-1 flex flex-wrap gap-1">
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-[10px] font-semibold">
+                                        {getCategoryLabel(item.category)}
                                     </span>
                                     {item.discontinued && (
-                                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 rounded-md text-xs font-semibold ml-2">
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 rounded text-[10px] font-semibold">
                                             🚫 Ngưng bán
                                         </span>
                                     )}
                                 </div>
 
-                                {item.description && (
-                                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">
-                                        {item.description}
-                                    </p>
-                                )}
-
                                 {/* Price */}
-                                <div className="flex items-center gap-2 mb-4">
+                                <div className="flex items-center gap-1 mb-2">
                                     {item.currency === 'coins' ? (
                                         <>
-                                            <CoinIcon size={20} />
-                                            <span className="font-bold text-lg text-gray-900 dark:text-white">
+                                            <CoinIcon size={14} />
+                                            <span className="font-bold text-sm text-gray-900 dark:text-white">
                                                 {item.price} Xu
+                                            </span>
+                                        </>
+                                    ) : item.currency === 'gold' ? (
+                                        <>
+                                            <GoldIcon size={14} />
+                                            <span className="font-bold text-sm text-gray-900 dark:text-white">
+                                                {item.price} Đồng Vàng
                                             </span>
                                         </>
                                     ) : (
                                         <>
-                                            <GoldIcon size={20} />
-                                            <span className="font-bold text-lg text-gray-900 dark:text-white">
-                                                {item.price} Đồng Vàng
+                                            <span className="text-sm">💵</span>
+                                            <span className="font-bold text-sm text-gray-900 dark:text-white">
+                                                {Number(item.price).toLocaleString('vi-VN')} VNĐ
                                             </span>
                                         </>
                                     )}
                                 </div>
 
                                 {/* Actions */}
-                                <div className="space-y-2">
-                                    <div className="flex gap-2">
+                                <div className="space-y-1">
+                                    <div className="flex gap-1">
                                         <button
                                             onClick={() => handleEdit(item)}
-                                            className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-1"
+                                            className="flex-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold transition-colors flex items-center justify-center gap-1"
                                         >
-                                            <span className="text-sm">✏️</span>
-                                            Sửa
+                                            ✏️ Sửa
                                         </button>
                                         <button
                                             onClick={() => handleDelete(item)}
-                                            className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-1"
+                                            className="flex-1 px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-semibold transition-colors flex items-center justify-center gap-1"
                                         >
-                                            <span className="text-sm">🗑️</span>
-                                            Xóa
+                                            🗑️ Xóa
                                         </button>
                                     </div>
                                     <button
                                         onClick={() => toggleDiscontinued(item)}
-                                        className={`w-full px-4 py-2 rounded-lg font-semibold transition-colors flex items-center justify-center gap-1 ${item.discontinued
+                                        className={`w-full px-2 py-1 rounded text-xs font-semibold transition-colors flex items-center justify-center gap-1 ${item.discontinued
                                             ? 'bg-green-600 hover:bg-green-700 text-white'
                                             : 'bg-orange-600 hover:bg-orange-700 text-white'
                                             }`}
                                     >
-                                        <span className="text-sm">{item.discontinued ? '✓' : '🚫'}</span>
-                                        {item.discontinued ? 'Mở bán lại' : 'Ngưng bán'}
+                                        {item.discontinued ? '✓ Mở bán lại' : '🚫 Ngưng bán'}
                                     </button>
                                 </div>
                             </div>
@@ -344,64 +442,128 @@ export default function AdminStore() {
                                     </label>
                                     <div className="flex flex-col items-center gap-4">
                                         {imagePreview && (
-                                            <img
-                                                src={imagePreview}
-                                                alt="Preview"
-                                                className="w-48 h-48 object-cover rounded-lg"
-                                            />
+                                            <div className="relative">
+                                                <img
+                                                    src={imagePreview}
+                                                    alt="Preview"
+                                                    className="w-48 h-48 object-cover rounded-lg"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setImageFile(null);
+                                                        setImagePreview('');
+                                                        setFormData(prev => ({ ...prev, imageUrl: '' }));
+                                                    }}
+                                                    title="Xóa ảnh"
+                                                    className="absolute -top-2 -right-2 w-7 h-7 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white text-sm font-bold shadow-md transition-colors"
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
                                         )}
+                                        <label
+                                            htmlFor="store-item-image-upload"
+                                            className="w-full flex flex-col items-center justify-center gap-1 px-4 py-6 border-2 border-dashed border-blue-300 dark:border-blue-700 rounded-lg
+                        bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50
+                        cursor-pointer transition-colors"
+                                        >
+                                            <span className="text-2xl">📤</span>
+                                            <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+                                                Bấm để tải ảnh lên
+                                            </span>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                Chọn ảnh từ máy tính (JPG, PNG...)
+                                            </span>
+                                        </label>
                                         <input
+                                            id="store-item-image-upload"
                                             type="file"
                                             accept="image/*"
                                             onChange={handleImageChange}
-                                            className="block w-full text-sm text-gray-500 dark:text-gray-400
-                        file:mr-4 file:py-2 file:px-4
-                        file:rounded-lg file:border-0
-                        file:text-sm file:font-semibold
-                        file:bg-blue-50 file:text-blue-700
-                        hover:file:bg-blue-100
-                        dark:file:bg-blue-900 dark:file:text-blue-300"
+                                            className="hidden"
                                         />
                                     </div>
                                 </div>
 
-                                {/* Name */}
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                                        Tên món hàng *
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={formData.name}
-                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                                {/* Name + Category */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                            Tên món hàng *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formData.name}
+                                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
                       bg-white dark:bg-gray-700 text-gray-900 dark:text-white
                       focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                        required
-                                    />
+                                            required
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                            Loại hàng *
+                                        </label>
+                                        <select
+                                            value={formData.category}
+                                            onChange={(e) => setFormData({
+                                                ...formData,
+                                                category: e.target.value,
+                                                // Thức ăn heo luôn mua bằng Xu theo luật game
+                                                ...(e.target.value === 'pig-food' ? { currency: 'coins' } : {})
+                                            })}
+                                            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                      bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                      focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            required
+                                        >
+                                            {categories.map((cat) => (
+                                                <option key={cat.key} value={cat.key}>
+                                                    {cat.emoji} {cat.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
                                 </div>
 
-                                {/* Category */}
+                                {/* Purchase Type */}
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                                        Loại hàng *
+                                        Hình thức mua *
                                     </label>
-                                    <select
-                                        value={formData.category}
-                                        onChange={(e) => setFormData({
-                                            ...formData,
-                                            category: e.target.value,
-                                            // Thức ăn heo luôn mua bằng Xu theo luật game
-                                            ...(e.target.value === 'pig-food' ? { currency: 'coins' } : {})
-                                        })}
-                                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
-                      bg-white dark:bg-gray-700 text-gray-900 dark:text-white
-                      focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                        required
-                                    >
-                                        <option value="avatar-border">🖼️ Viền Avatar</option>
-                                        <option value="pig-food">🌽 Thức ăn heo (game Heo Đất)</option>
-                                    </select>
+                                    <div className="flex gap-4">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                value="online"
+                                                checked={formData.purchaseType === 'online'}
+                                                onChange={(e) => setFormData({
+                                                    ...formData,
+                                                    purchaseType: e.target.value,
+                                                    // VNĐ chỉ áp dụng cho mua trực tiếp
+                                                    ...(formData.currency === 'vnd' ? { currency: 'coins' } : {})
+                                                })}
+                                                className="w-4 h-4 text-blue-600"
+                                            />
+                                            <span className="text-gray-900 dark:text-white">🛒 Mua online</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                value="offline"
+                                                checked={formData.purchaseType === 'offline'}
+                                                onChange={(e) => setFormData({ ...formData, purchaseType: e.target.value })}
+                                                className="w-4 h-4 text-blue-600"
+                                            />
+                                            <span className="text-gray-900 dark:text-white">🤝 Mua trực tiếp</span>
+                                        </label>
+                                    </div>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Mua trực tiếp: HS chỉ xem hàng trên Cửa Hàng, đến gặp admin để mua, admin trừ Xu/Vàng thủ công ở mục Vi Phạm.
+                                    </p>
                                 </div>
 
                                 {/* Currency Type */}
@@ -432,7 +594,25 @@ export default function AdminStore() {
                                             <GoldIcon size={20} />
                                             <span className="text-gray-900 dark:text-white">Đồng Vàng</span>
                                         </label>
+                                        {formData.purchaseType === 'offline' && (
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    value="vnd"
+                                                    checked={formData.currency === 'vnd'}
+                                                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                                                    className="w-4 h-4 text-blue-600"
+                                                />
+                                                <span className="text-lg">💵</span>
+                                                <span className="text-gray-900 dark:text-white">VNĐ</span>
+                                            </label>
+                                        )}
                                     </div>
+                                    {formData.currency === 'vnd' && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                            VNĐ chỉ dùng để hiển thị giá tham khảo, không trừ qua hệ thống.
+                                        </p>
+                                    )}
                                 </div>
 
                                 {/* Price */}
@@ -470,6 +650,75 @@ export default function AdminStore() {
                                         disabled={uploading}
                                     >
                                         {uploading ? 'Đang lưu...' : (editingItem ? 'Cập nhật' : 'Thêm mới')}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add Category Modal */}
+            {showAddCategory && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl max-w-md w-full">
+                        <div className="p-6">
+                            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
+                                Thêm Loại Hàng Mới
+                            </h2>
+                            <form onSubmit={handleAddCategory} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                        Biểu tượng loại hàng
+                                    </label>
+                                    <div className="grid grid-cols-8 gap-2">
+                                        {CATEGORY_EMOJIS.map((emoji) => (
+                                            <button
+                                                key={emoji}
+                                                type="button"
+                                                onClick={() => setNewCategoryEmoji(emoji)}
+                                                className={`text-xl p-2 rounded-lg border transition-colors ${newCategoryEmoji === emoji
+                                                    ? 'border-blue-500 bg-blue-100 dark:bg-blue-900'
+                                                    : 'border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                    }`}
+                                            >
+                                                {emoji}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                        Tên loại hàng *
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={newCategoryLabel}
+                                        onChange={(e) => setNewCategoryLabel(e.target.value)}
+                                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                      bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                      focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        required
+                                        autoFocus
+                                    />
+                                </div>
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setShowAddCategory(false);
+                                            setNewCategoryLabel('');
+                                            setNewCategoryEmoji('🏷️');
+                                        }}
+                                        className="flex-1 px-6 py-3 bg-gray-300 hover:bg-gray-400 dark:bg-gray-600 dark:hover:bg-gray-700 text-gray-900 dark:text-white rounded-lg font-semibold transition-colors"
+                                    >
+                                        Hủy
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors"
+                                    >
+                                        Thêm
                                     </button>
                                 </div>
                             </form>

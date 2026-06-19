@@ -18,6 +18,7 @@ const Classes = () => {
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [renamingClass, setRenamingClass] = useState(null);
   const [newDisplayName, setNewDisplayName] = useState('');
+  const [newGrade, setNewGrade] = useState('6');
   const [isRenaming, setIsRenaming] = useState(false);
 
   useEffect(() => {
@@ -107,20 +108,30 @@ const Classes = () => {
   const handleOpenRename = (classItem) => {
     setRenamingClass(classItem);
     setNewDisplayName(classItem.displayName || '');
+    setNewGrade(String(classItem.grade || '6'));
     setShowRenameModal(true);
   };
 
-  const handleRenameClass = async () => {
+  const handleRenameClass = async (keepDisplayName = true) => {
     if (!renamingClass) return;
     setIsRenaming(true);
-    const trimmed = newDisplayName.trim();
-    const result = await updateClassDisplayName(renamingClass.id, trimmed || null);
+    const trimmed = keepDisplayName ? newDisplayName.trim() : '';
+    const gradeChanged = parseInt(newGrade, 10) !== parseInt(renamingClass.grade, 10);
+    const result = await updateClassDisplayName(
+      renamingClass.id,
+      trimmed || null,
+      gradeChanged ? newGrade : undefined
+    );
     setIsRenaming(false);
     if (result.success) {
       setShowRenameModal(false);
       setRenamingClass(null);
       setNewDisplayName('');
-      setToast({ type: 'success', message: trimmed ? `Đã đổi tên hiển thị thành "${trimmed}"` : 'Đã xóa tên hiển thị tùy chỉnh' });
+      const messages = [];
+      if (trimmed) messages.push(`tên hiển thị thành "${trimmed}"`);
+      else if (!keepDisplayName) messages.push('xóa tên hiển thị tùy chỉnh');
+      if (gradeChanged) messages.push(`khối thành ${newGrade}`);
+      setToast({ type: 'success', message: messages.length ? `Đã cập nhật ${messages.join(', ')}` : 'Đã lưu thay đổi' });
       fetchClasses();
     } else {
       setToast({ type: 'error', message: result.error || 'Lỗi khi đổi tên hiển thị' });
@@ -431,6 +442,28 @@ const Classes = () => {
                   autoFocus
                 />
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#111812] dark:text-white mb-2">
+                  Khối
+                </label>
+                <select
+                  value={newGrade}
+                  onChange={(e) => setNewGrade(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-[#d0e5d4] dark:border-white/20 bg-white dark:bg-white/5 text-[#111812] dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  {[6, 7, 8, 9, 10, 11, 12].map((grade) => (
+                    <option key={grade} value={grade}>
+                      Lớp {grade}
+                    </option>
+                  ))}
+                </select>
+                {parseInt(newGrade, 10) !== parseInt(renamingClass.grade, 10) && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                    Đổi khối sẽ ảnh hưởng đến bảng xếp hạng theo khối, video theo khối và heo đất của học sinh trong lớp này.
+                  </p>
+                )}
+              </div>
               {newDisplayName.trim() && (
                 <div className="px-4 py-3 rounded-xl bg-primary/10 border border-primary/20">
                   <p className="text-xs text-[#608a67] dark:text-[#8ba890] mb-1">Xem trước:</p>
@@ -449,7 +482,7 @@ const Classes = () => {
               </button>
               {renamingClass.displayName && (
                 <button
-                  onClick={() => { setNewDisplayName(''); handleRenameClass(); }}
+                  onClick={() => { setNewDisplayName(''); handleRenameClass(false); }}
                   disabled={isRenaming}
                   className="py-3 px-4 rounded-xl border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Xóa tên tùy chỉnh, về tên gốc"
@@ -458,7 +491,7 @@ const Classes = () => {
                 </button>
               )}
               <button
-                onClick={handleRenameClass}
+                onClick={() => handleRenameClass()}
                 disabled={isRenaming}
                 className="flex-1 py-3 px-4 rounded-xl bg-primary text-[#052e16] font-bold hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
