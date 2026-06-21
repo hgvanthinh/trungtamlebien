@@ -34,10 +34,6 @@ import AdminStore from './pages/admin/AdminStore';
 import PigPet from './pages/PigPet';
 import Transfer from './pages/Transfer';
 import AdminPigGame from './pages/admin/AdminPigGame';
-import GameLobby from './pages/public/GameLobby';
-import BombGame from './pages/public/BombGame';
-import PhaserBombGame from './pages/public/PhaserBombGame';
-import TournamentLobby from './pages/public/TournamentLobby';
 
 function App() {
   return (
@@ -72,10 +68,6 @@ function App() {
                 <Route path="exam/:examId" element={<ExamTaking />} />
                 <Route path="exam/:examId/result/:submissionId" element={<ExamResult />} />
                 <Route path="videos" element={<Videos />} />
-                <Route path="game-lobby" element={<GameLobby />} />
-                <Route path="game/:roomId" element={<BombGame />} />
-                <Route path="phaser-game/:roomId" element={<PhaserBombGame />} />
-                <Route path="tournament/:tournamentId" element={<TournamentLobby />} />
               </Route>
 
               {/* Admin routes */}

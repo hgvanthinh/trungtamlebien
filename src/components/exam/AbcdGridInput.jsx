@@ -112,7 +112,7 @@ export function AbcdGridInput({ maxQuestions = 12, value = {}, onChange }) {
 
     while ((match = withNumbers.exec(pastedText)) !== null) {
       const questionNum = parseInt(match[1]);
-      if (questionNum >= 1 && questionNum <= maxQuestions) {
+      if (questionNum >= 1) {
         newValue[questionNum] = match[2].toUpperCase();
         hasMatches = true;
       }
@@ -127,9 +127,7 @@ export function AbcdGridInput({ maxQuestions = 12, value = {}, onChange }) {
 
       answers.forEach((answer, index) => {
         const questionNum = index + 1;
-        if (questionNum <= maxQuestions) {
-          newValue[questionNum] = answer;
-        }
+        newValue[questionNum] = answer;
       });
     }
 

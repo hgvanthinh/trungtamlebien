@@ -162,27 +162,9 @@ export function validateQuestionCounts(counts) {
   const errors = [];
   const { abcd = 0, trueFalse = 0, shortAnswer = 0 } = counts;
 
-  // Maximum limits
-  const maxLimits = {
-    abcd: 12,
-    trueFalse: 4,
-    shortAnswer: 6
-  };
-
   // Check if at least one question type has questions
   if (abcd === 0 && trueFalse === 0 && shortAnswer === 0) {
     errors.push('Phải có ít nhất 1 loại câu hỏi');
-  }
-
-  // Check maximum limits
-  if (abcd > maxLimits.abcd) {
-    errors.push(`Trắc nghiệm ABCD: Tối đa ${maxLimits.abcd} câu (hiện tại: ${abcd})`);
-  }
-  if (trueFalse > maxLimits.trueFalse) {
-    errors.push(`Đúng/Sai: Tối đa ${maxLimits.trueFalse} câu (hiện tại: ${trueFalse})`);
-  }
-  if (shortAnswer > maxLimits.shortAnswer) {
-    errors.push(`Trả lời ngắn: Tối đa ${maxLimits.shortAnswer} câu (hiện tại: ${shortAnswer})`);
   }
 
   // Check for negative values

@@ -72,14 +72,12 @@ export function ShortAnswerGridInput({ maxQuestions = 6, value = {}, onChange })
     const newValue = { ...value };
     lines.forEach((line, index) => {
       const targetQuestion = questionNum + index;
-      if (targetQuestion <= maxQuestions) {
-        newValue[targetQuestion] = [line];
-      }
+      newValue[targetQuestion] = [line];
     });
 
     // Auto-expand visible rows to fit pasted data
     const pastedMax = questionNum + lines.length - 1;
-    if (pastedMax > visibleCount) setVisibleCount(Math.min(pastedMax, maxQuestions));
+    if (pastedMax > visibleCount) setVisibleCount(pastedMax);
 
     onChange(newValue);
   };

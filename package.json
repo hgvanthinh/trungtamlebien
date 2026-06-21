@@ -8,23 +8,19 @@
     "build": "vite build",
     "lint": "eslint .",
     "dev:all": "concurrently \"npm run dev\" \"firebase emulators:start\"",
-    "dev:game": "concurrently --names \"VITE,GAME\" --prefix-colors \"cyan,yellow\" \"vite\" \"npm run dev --prefix game-server\"",
     "preview": "vite preview"
   },
   "dependencies": {
     "browser-image-compression": "^2.0.2",
     "firebase": "^12.7.0",
-    "howler": "^2.2.4",
     "html2pdf.js": "^0.13.0",
     "mammoth": "^1.11.0",
     "mathlive": "^0.108.2",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.4.530",
-    "phaser": "^3.90.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.11.0",
-    "socket.io-client": "^4.8.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

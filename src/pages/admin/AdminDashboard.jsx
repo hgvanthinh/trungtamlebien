@@ -109,13 +109,6 @@ const AdminDashboard = () => {
       color: 'purple',
       route: '/admin/background-settings',
     },
-    {
-      title: 'Game vui Toán',
-      description: 'Tổ chức trò chơi cho học sinh',
-      icon: 'stadia_controller',
-      color: 'orange',
-      route: '/game-lobby',
-    },
   ];
 
   const colorClasses = {

@@ -19,7 +19,6 @@ const Sidebar = ({ user, onLogout, onMenuItemClick }) => {
     { path: '/leaderboard', icon: 'emoji_events', label: 'Bảng xếp hạng' },
     { path: '/exams', icon: 'quiz', label: 'Đề thi' },
     { path: '/videos', icon: 'video_library', label: 'Kho video' },
-    { path: '/game-lobby', icon: 'stadia_controller', label: 'Game vui Toán', filled: true, badge: '🎮 Mới' },
     { path: '/rules', icon: 'gavel', label: 'Nội quy' },
     { path: '/materials', icon: 'menu_book', label: 'Tài liệu Toán', disabled: true },
   ];
@@ -35,7 +34,6 @@ const Sidebar = ({ user, onLogout, onMenuItemClick }) => {
     { path: '/admin/pig-game', icon: 'savings', label: 'Heo Đất - Game', filled: true, badge: '🐷' },
     { path: '/admin/exam-bank', icon: 'quiz', label: 'Kho đề thi' },
     { path: '/admin/videos', icon: 'video_library', label: 'Kho video' },
-    { path: '/game-lobby', icon: 'stadia_controller', label: 'Game vui Toán', filled: true, badge: '🎮 Mới' },
     { path: '/admin/grade-submissions', icon: 'grading', label: 'Chấm bài' },
     { path: '/admin/background-settings', icon: 'wallpaper', label: 'Cài đặt hình nền' },
     { path: '/admin/stats', icon: 'analytics', label: 'Thống kê', disabled: true },

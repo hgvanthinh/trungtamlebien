@@ -391,7 +391,7 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete, editingExam }) => {
                     TRẮC NGHIỆM ABCD
                   </h3>
                   <p className="text-xs text-gray-500 mt-1">
-                    Tối đa 12 câu — Mỗi câu: {formatPoints(dynamicPoints.abcd)}đ
+                    Mỗi câu: {formatPoints(dynamicPoints.abcd)}đ
                   </p>
                 </div>
                 <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
@@ -432,7 +432,7 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete, editingExam }) => {
                     ĐÚNG/SAI
                   </h3>
                   <p className="text-xs text-gray-500 mt-1">
-                    Tối đa 4 câu × 4 ý — Mỗi câu: {formatPoints(dynamicPoints.trueFalse)}đ
+                    Mỗi câu có 4 ý — Mỗi câu: {formatPoints(dynamicPoints.trueFalse)}đ
                     <br />
                     <span className="text-[10px]">
                       Chấm điểm: 4/4=1đ, 3/4=0.5đ, 2/4=0.25đ, 1/4=0.1đ (nhân với điểm câu)
@@ -477,7 +477,7 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete, editingExam }) => {
                     TRẢ LỜI NGẮN
                   </h3>
                   <p className="text-xs text-gray-500 mt-1">
-                    Tối đa 6 câu — Mỗi câu: {formatPoints(dynamicPoints.shortAnswer)}đ
+                    Mỗi câu: {formatPoints(dynamicPoints.shortAnswer)}đ
                   </p>
                 </div>
                 <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
