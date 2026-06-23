@@ -17,11 +17,40 @@ import { getDateKeyVN, getWeekIdVN, updatePigGameSettings } from './gameSettings
 const BATCH_LIMIT = 450;
 
 /**
+ * Lấy grade thực tế hiện tại của mỗi heo dựa trên lớp hiện tại của chủ heo,
+ * vì field `grade` lưu trên pig doc chỉ được đồng bộ khi HS tự mở trang Heo Đất
+ * (có thể bị lệch nếu HS đổi lớp hoặc mua heo trước khi được gán lớp).
+ */
+const resolveCurrentGrades = async (pigs) => {
+    const [classesSnap, usersSnap] = await Promise.all([
+        getDocs(collection(db, 'classes')),
+        getDocs(collection(db, 'users'))
+    ]);
+
+    const classGradeMap = {};
+    classesSnap.forEach(d => {
+        classGradeMap[d.id] = parseInt(d.data().grade) || 0;
+    });
+
+    const userClassMap = {};
+    usersSnap.forEach(d => {
+        userClassMap[d.id] = d.data().classes || [];
+    });
+
+    return pigs.map(pig => {
+        const userClasses = userClassMap[pig.ownerUid] || [];
+        const grade = userClasses.length > 0 ? (classGradeMap[userClasses[0]] || 0) : 0;
+        return { ...pig, grade };
+    });
+};
+
+/**
  * Xem trước kết quả chốt tuần (chỉ đọc, không ghi).
  * Mỗi khối: top N heo (level desc → xp desc → đạt XP trước) được +1 lượt đập heo.
  */
 export const previewWeeklyResults = async (settings) => {
-    const allPigs = await getAllPigs(); // đã sort sẵn
+    const rawPigs = await getAllPigs(); // đã sort sẵn
+    const allPigs = await resolveCurrentGrades(rawPigs);
 
     const gradeGroups = {};
     allPigs.forEach(pig => {
