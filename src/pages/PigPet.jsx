@@ -76,7 +76,7 @@ export default function PigPet() {
     const handleFeed = async () => {
         try {
             setBusy(true);
-            const result = await feedPig(uid, userName, settings);
+            const result = await feedPig(uid, userName);
             setPig(prev => ({
                 ...prev,
                 xp: result.newXp,

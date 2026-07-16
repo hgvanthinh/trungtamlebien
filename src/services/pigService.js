@@ -1,4 +1,4 @@
-import { db } from '../config/firebase';
+import { db, auth } from '../config/firebase';
 import {
     collection,
     doc,
@@ -10,7 +10,10 @@ import {
     runTransaction,
     serverTimestamp
 } from 'firebase/firestore';
-import { getDateKeyVN, getWeekIdVN, getActiveWindow } from './gameSettingsService';
+import { getIdToken } from 'firebase/auth';
+import { getDateKeyVN, getWeekIdVN } from './gameSettingsService';
+
+const FUNCTIONS_URL = 'https://asia-southeast1-toanthaybien-2c3d2.cloudfunctions.net';
 
 const pigRef = (uid) => doc(db, 'pigs', uid);
 const userRef = (uid) => doc(db, 'users', uid);
@@ -106,64 +109,20 @@ export const buyFood = async (uid, userName, quantity, unitPrice) => {
  * Cho heo ăn: trong khung giờ cố định (mỗi khung 1 lần/ngày) hoặc dùng lượt cho ăn thêm.
  * Mỗi lần ăn tốn 1 đồ ăn, nhận XP ngẫu nhiên đều từ feedXpMin đến feedXpMax.
  */
-export const feedPig = async (uid, userName, settings) => {
-    const span = settings.feedXpMax - settings.feedXpMin + 1;
-    const xpGained = settings.feedXpMin + Math.floor(Math.random() * span);
-
-    return await runTransaction(db, async (transaction) => {
-        const pigDoc = await transaction.get(pigRef(uid));
-        if (!pigDoc.exists()) throw new Error('Bạn chưa có heo!');
-
-        const pig = pigDoc.data();
-        if ((pig.food || 0) < 1) throw new Error('Hết đồ ăn! Hãy mua thức ăn cho heo.');
-
-        const dateKey = getDateKeyVN();
-        const activeWindow = getActiveWindow(settings);
-
-        let feedType;
-        const updates = {};
-
-        if (activeWindow && pig.windowFeeds?.[activeWindow.id] !== dateKey) {
-            // Cho ăn trong khung giờ cố định, khung này hôm nay chưa ăn
-            feedType = 'feed_window';
-            updates.windowFeeds = { ...(pig.windowFeeds || {}), [activeWindow.id]: dateKey };
-        } else {
-            // Cho ăn thêm ngoài khung (hoặc khung đã ăn rồi)
-            const extra = pig.extraFeeds?.dateKey === dateKey ? pig.extraFeeds : { dateKey, count: 0 };
-            if (extra.count >= settings.maxExtraFeedsPerDay) {
-                throw new Error(
-                    activeWindow
-                        ? 'Khung giờ này heo đã ăn rồi và bạn đã hết lượt cho ăn thêm hôm nay!'
-                        : 'Bạn đã hết lượt cho ăn thêm hôm nay! Chờ khung giờ cố định nhé.'
-                );
-            }
-            feedType = 'feed_extra';
-            updates.extraFeeds = { dateKey, count: extra.count + 1 };
-        }
-
-        const newXp = (pig.xp || 0) + xpGained;
-        const newLevel = calcLevel(newXp, settings.xpPerLevel);
-        const leveledUp = newLevel > (pig.level || 1);
-
-        transaction.update(pigRef(uid), {
-            ...updates,
-            food: (pig.food || 0) - 1,
-            xp: newXp,
-            level: newLevel,
-            lastXpAt: serverTimestamp(),
-            lastFeedAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-        });
-        if (leveledUp) {
-            transaction.update(userRef(uid), { pigLevel: newLevel, updatedAt: serverTimestamp() });
-        }
-        writeLog(transaction, {
-            uid, userName, type: feedType,
-            detail: { windowId: activeWindow?.id || null, xpGained, newXp, newLevel }
-        });
-
-        return { xpGained, newXp, newLevel, leveledUp, newFood: (pig.food || 0) - 1 };
+// feedPig chạy server-side qua Cloud Function để chống gian lận đổi giờ máy.
+export const feedPig = async (uid, userName) => {
+    const idToken = await getIdToken(auth.currentUser);
+    const res = await fetch(`${FUNCTIONS_URL}/feedPig`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ uid, userName }),
     });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Lỗi khi cho heo ăn');
+    return data;
 };
 
 /**
