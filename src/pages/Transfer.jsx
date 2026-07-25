@@ -3,7 +3,7 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { getPigGameSettings } from '../services/gameSettingsService';
-import { transferCurrency, getTransfersLeftToday, getMyTransfers } from '../services/transferService';
+import { transferCurrency, getTransfersLeftToday, getMyTransfers, isAccountApproved } from '../services/transferService';
 import Avatar from '../components/common/Avatar';
 import CoinIcon from '../components/common/CoinIcon';
 import GoldIcon from '../components/common/GoldIcon';
@@ -37,8 +37,8 @@ export default function Transfer() {
                 setSettings(s);
                 setStudents(
                     studentsSnap.docs
-                        .map(d => ({ uid: d.id, fullName: d.data().fullName, username: d.data().username, avatar: d.data().avatar }))
-                        .filter(st => st.uid !== uid)
+                        .map(d => ({ uid: d.id, fullName: d.data().fullName, username: d.data().username, avatar: d.data().avatar, approved: isAccountApproved(d.data()) }))
+                        .filter(st => st.uid !== uid && st.approved)
                         .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'vi'))
                 );
                 setHistory(myHistory);
@@ -55,7 +55,8 @@ export default function Transfer() {
     const transfersLeft = settings ? getTransfersLeftToday(userProfile, settings) : 0;
     const amountNum = parseInt(amount, 10) || 0;
     const balance = currency === 'coins' ? (userProfile?.coins || 0) : (userProfile?.gold || 0);
-    const canSend = recipient && amountNum > 0 && amountNum <= balance && transfersLeft > 0
+    const selfApproved = isAccountApproved(userProfile);
+    const canSend = selfApproved && recipient && amountNum > 0 && amountNum <= balance && transfersLeft > 0
         && (!settings?.transferMaxAmount || amountNum <= settings.transferMaxAmount);
 
     const handleSend = async () => {
@@ -112,6 +113,12 @@ export default function Transfer() {
                     {settings.transferMaxAmount > 0 && `, mỗi lần tối đa ${settings.transferMaxAmount}`}
                 </p>
             </div>
+
+            {!selfApproved && (
+                <div className="mb-6 px-4 py-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700/40 text-red-700 dark:text-red-300 font-semibold">
+                    ⚠️ Tài khoản của bạn chưa được admin duyệt nên chưa thể chuyển hoặc nhận Xu/Vàng. Vui lòng liên hệ giáo viên.
+                </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Form chuyển */}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getAllStudents, resetStudentPassword, deleteStudent } from '../../services/adminService';
 import { getAllClasses, addStudentToClass, removeStudentFromClass } from '../../services/classService';
+import { isAccountApproved } from '../../services/transferService';
 import { db } from '../../config/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import ResetPasswordModal from '../../components/admin/ResetPasswordModal';
@@ -153,6 +154,8 @@ const Students = () => {
       filtered = filtered.filter(
         (student) => !student.classes || student.classes.length === 0
       );
+    } else if (classFilter === '__pending__') {
+      filtered = filtered.filter((student) => !isAccountApproved(student));
     } else if (classFilter) {
       filtered = filtered.filter(
         (student) => student.classes && student.classes.includes(classFilter)
@@ -276,6 +279,22 @@ const Students = () => {
     }
   };
 
+  const handleToggleApproved = async (student) => {
+    const nextApproved = !isAccountApproved(student);
+    try {
+      await updateDoc(doc(db, 'users', student.uid), { approved: nextApproved });
+      setToast({
+        type: 'success',
+        message: nextApproved ? `Đã duyệt tài khoản ${student.fullName}` : `Đã huỷ duyệt tài khoản ${student.fullName}`,
+      });
+      setStudents((prev) =>
+        prev.map((s) => (s.uid === student.uid ? { ...s, approved: nextApproved } : s))
+      );
+    } catch (err) {
+      setToast({ type: 'error', message: `Lỗi cập nhật duyệt: ${err.message}` });
+    }
+  };
+
   const handleDeleteStudent = async (student) => {
     if (!confirm(`Bạn có chắc muốn xóa học sinh ${student.fullName}?`)) return;
     const result = await deleteStudent(student.uid);
@@ -371,6 +390,7 @@ const Students = () => {
             >
               <option value="">Tất cả lớp</option>
               <option value="__unassigned__">Chưa phân lớp</option>
+              <option value="__pending__">Chờ duyệt</option>
               {classes.map((cls) => (
                 <option key={cls.id} value={cls.id}>{cls.displayName || cls.name}</option>
               ))}
@@ -486,6 +506,7 @@ const Students = () => {
                   </th>
                   <th className="px-6 py-4 text-left text-sm font-bold text-[#111812] dark:text-white">Học sinh</th>
                   <th className="px-6 py-4 text-left text-sm font-bold text-[#111812] dark:text-white">Lớp học</th>
+                  <th className="px-4 py-4 text-center text-sm font-bold text-[#111812] dark:text-white">Duyệt</th>
                   {/* Asset columns header */}
                   {showAssetsMode && (
                     <>
@@ -575,6 +596,20 @@ const Students = () => {
                         >
                           <p className="text-[#111812] dark:text-white font-medium">{getStudentClasses(student)}</p>
                           <p className="text-xs text-[#608a67] dark:text-[#8ba890]">Nhấn để phân lớp</p>
+                        </button>
+                      </td>
+
+                      {/* Approved toggle */}
+                      <td className="px-4 py-3 text-center">
+                        <button
+                          onClick={() => handleToggleApproved(student)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${isAccountApproved(student)
+                              ? 'bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/30'
+                              : 'bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/30'
+                            }`}
+                          title={isAccountApproved(student) ? 'Nhấn để huỷ duyệt' : 'Nhấn để duyệt tài khoản'}
+                        >
+                          {isAccountApproved(student) ? 'Đã duyệt' : 'Chờ duyệt'}
                         </button>
                       </td>
 

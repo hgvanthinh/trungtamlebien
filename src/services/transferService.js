@@ -13,9 +13,21 @@ import {
 import { getDateKeyVN } from './gameSettingsService';
 
 /**
+ * Tài khoản được coi là "đã duyệt" nếu admin duyệt tường minh (approved === true),
+ * hoặc là tài khoản cũ (chưa có field approved) đã được phân lớp — coi như đã duyệt sẵn.
+ */
+export const isAccountApproved = (userData) => {
+    if (!userData) return false;
+    if (userData.approved === true) return true;
+    if (userData.approved === false) return false;
+    return Array.isArray(userData.classes) && userData.classes.length > 0;
+};
+
+/**
  * Chuyển Xu/Đồng Vàng giữa 2 học sinh.
  * - Giới hạn số lần/ngày (settings.transferDailyLimit), đếm trên users.transferStats của người gửi
  * - Atomic: trừ người gửi + cộng người nhận + ghi log trong 1 transaction
+ * - Cả người gửi và người nhận đều phải được admin duyệt (xem /admin/students)
  */
 export const transferCurrency = async ({ fromUid, fromName, toUid, toName, currency, amount, settings }) => {
     if (!Number.isInteger(amount) || amount <= 0) throw new Error('Số lượng phải là số nguyên dương');
@@ -36,6 +48,13 @@ export const transferCurrency = async ({ fromUid, fromName, toUid, toName, curre
         if (!toDoc.exists()) throw new Error('Không tìm thấy người nhận');
 
         const fromData = fromDoc.data();
+        if (!isAccountApproved(fromData)) {
+            throw new Error('Tài khoản của bạn chưa được admin duyệt, không thể chuyển khoản');
+        }
+        if (!isAccountApproved(toDoc.data())) {
+            throw new Error('Tài khoản người nhận chưa được admin duyệt');
+        }
+
         const dateKey = getDateKeyVN();
 
         // Giới hạn lượt chuyển trong ngày

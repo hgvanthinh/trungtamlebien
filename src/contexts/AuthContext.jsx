@@ -37,6 +37,7 @@ export const AuthProvider = ({ children }) => {
         role: 'student',
         avatar: '',
         classes: [], // Danh sách lớp học (admin sẽ gán sau)
+        approved: false, // Chờ admin duyệt tại /admin/students trước khi giao dịch được
         createdAt: new Date().toISOString(),
         stats: {
           completedLessons: 0,

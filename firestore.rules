@@ -17,6 +17,13 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    // Helper function: Tài khoản đã được admin duyệt chưa
+    // - approved == true: đã duyệt tường minh
+    // - approved không tồn tại (tài khoản cũ) nhưng đã có lớp: coi như đã duyệt sẵn
+    function isAccountApproved(userData) {
+      return userData.get('approved', userData.get('classes', []).size() > 0) == true;
+    }
+
     // Collection: users
     match /users/{userId} {
       // Admin có thể đọc/ghi tất cả user documents
@@ -31,17 +38,18 @@ service cloud.firestore {
 
       // Cho phép tạo tài khoản mới (đăng ký)
       // User phải tạo document với uid trùng với auth uid
-      // Chỉ cho phép tạo với role='student' và classes=[]
+      // Chỉ cho phép tạo với role='student', classes=[] và approved=false (chờ admin duyệt)
       allow create: if isOwner(userId)
         && request.resource.data.role == 'student'
         && request.resource.data.classes == []
-        && request.resource.data.keys().hasAll(['username', 'fullName', 'email', 'role', 'classes']);
+        && request.resource.data.approved == false
+        && request.resource.data.keys().hasAll(['username', 'fullName', 'email', 'role', 'classes', 'approved']);
 
       // User có thể cập nhật một số field của chính mình (avatar, stats)
       // Nhưng KHÔNG được thay đổi role, classes, email
       // và KHÔNG được tự tăng lượt đập heo (smashAttempts chỉ do admin chốt tuần cấp)
       allow update: if isOwner(userId)
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'email', 'classes'])
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'email', 'classes', 'approved'])
         && request.resource.data.get('smashAttempts', 0) <= resource.data.get('smashAttempts', 0);
 
       // Cho phép nhận chuyển khoản xu/vàng từ HS khác: chỉ được TĂNG coins/gold,
@@ -250,7 +258,9 @@ service cloud.firestore {
       allow create: if isAuthenticated()
         && request.resource.data.fromUid == request.auth.uid
         && request.resource.data.amount is int
-        && request.resource.data.amount > 0;
+        && request.resource.data.amount > 0
+        && isAccountApproved(get(/databases/$(database)/documents/users/$(request.resource.data.fromUid)).data)
+        && isAccountApproved(get(/databases/$(database)/documents/users/$(request.resource.data.toUid)).data);
       allow update, delete: if false;
     }
 
