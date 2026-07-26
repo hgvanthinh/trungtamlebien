@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Icon from '../components/common/Icon';
 
 /**
  * Custom hook để sử dụng ConfirmModal dễ dàng hơn
@@ -59,9 +60,11 @@ export const useConfirm = () => {
                                 config.type === 'info' ? 'text-blue-600 dark:text-blue-400' :
                                     'text-yellow-600 dark:text-yellow-400'
                             }`}>
-                            <span className="material-symbols-rounded text-2xl">
-                                {config.type === 'danger' ? 'error' : config.type === 'info' ? 'info' : 'warning'}
-                            </span>
+                            <Icon
+                                name={config.type === 'danger' ? 'error' : config.type === 'info' ? 'info' : 'warning'}
+                                size={28}
+                                filled
+                            />
                         </div>
                         <div className="flex-1">
                             <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">

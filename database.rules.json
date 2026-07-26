@@ -1,0 +1,10 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "versus_open_lobbies": { ".read": "auth != null", ".write": "auth != null" },
+    "versus_active_lobby": { ".read": "auth != null", ".write": "auth != null" },
+    "versus_lobbies": { ".read": "auth != null", ".write": "auth != null" },
+    "versus_sessions": { ".read": "auth != null", ".write": "auth != null" }
+  }
+}

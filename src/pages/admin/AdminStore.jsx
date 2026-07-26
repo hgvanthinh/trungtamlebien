@@ -10,6 +10,7 @@ import {
     createStoreCategory
 } from '../../services/storeService';
 import { compressStoreImage } from '../../services/fileProcessingService';
+import { VERSUS_ITEM_EFFECTS } from '../../services/versusItemService';
 import CoinIcon from '../../components/common/CoinIcon';
 import GoldIcon from '../../components/common/GoldIcon';
 import Toast from '../../components/common/Toast';
@@ -40,7 +41,8 @@ export default function AdminStore() {
         category: 'avatar-border', // 'avatar-border'
         purchaseType: 'online', // 'online' or 'offline'
         discontinued: false, // true = ngưng bán
-        imageUrl: ''
+        imageUrl: '',
+        effect: '' // chỉ dùng cho category 'versus-item'
     });
     const [imageFile, setImageFile] = useState(null);
     const [imagePreview, setImagePreview] = useState('');
@@ -141,6 +143,11 @@ export default function AdminStore() {
             return;
         }
 
+        if (formData.category === 'versus-item' && !formData.effect) {
+            setToast({ type: 'error', message: 'Vui lòng chọn Hiệu ứng Đấu Trí cho vật phẩm' });
+            return;
+        }
+
         try {
             setUploading(true);
 
@@ -161,7 +168,9 @@ export default function AdminStore() {
             const itemData = {
                 ...formData,
                 imageUrl,
-                price: Number(formData.price)
+                price: Number(formData.price),
+                // effect chỉ có nghĩa với vật phẩm Đấu Trí
+                effect: formData.category === 'versus-item' ? formData.effect : ''
             };
 
             if (editingItem) {
@@ -195,7 +204,8 @@ export default function AdminStore() {
             category: item.category || 'avatar-border',
             purchaseType: item.purchaseType || 'online',
             discontinued: item.discontinued || false,
-            imageUrl: item.imageUrl || ''
+            imageUrl: item.imageUrl || '',
+            effect: item.effect || ''
         });
         setImagePreview(item.imageUrl || '');
         setShowModal(true);
@@ -245,7 +255,8 @@ export default function AdminStore() {
             category: 'avatar-border',
             purchaseType: 'online',
             discontinued: false,
-            imageUrl: ''
+            imageUrl: '',
+            effect: ''
         });
         setImageFile(null);
         setImagePreview('');
@@ -528,6 +539,32 @@ export default function AdminStore() {
                                         </select>
                                     </div>
                                 </div>
+
+                                {/* Hiệu ứng Đấu Trí — chỉ hiện với vật phẩm versus-item */}
+                                {formData.category === 'versus-item' && (
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                            ⚔️ Hiệu ứng Đấu Trí *
+                                        </label>
+                                        <select
+                                            value={formData.effect}
+                                            onChange={(e) => setFormData({ ...formData, effect: e.target.value })}
+                                            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                      bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                      focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        >
+                                            <option value="">-- Chọn hiệu ứng --</option>
+                                            {Object.entries(VERSUS_ITEM_EFFECTS).map(([key, eff]) => (
+                                                <option key={key} value={key}>
+                                                    {eff.label} — {eff.description}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                            Vật phẩm dùng trong trận Đấu Trí 1v1. HS mua ở Cửa Hàng và kích hoạt khi thi đấu.
+                                        </p>
+                                    </div>
+                                )}
 
                                 {/* Purchase Type */}
                                 <div>

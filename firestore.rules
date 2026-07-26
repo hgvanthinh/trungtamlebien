@@ -270,6 +270,24 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ===== Game Đấu Trí 1v1 (Versus Game) =====
+    // Collection: versusGames (bài đấu do admin tạo)
+    match /versusGames/{gameId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+      // HS được tăng matchesPlayed +1 khi trận kết thúc
+      allow update: if isAuthenticated()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['matchesPlayed'])
+        && request.resource.data.matchesPlayed == resource.data.get('matchesPlayed', 0) + 1;
+    }
+
+    // Collection: versusMatchResults (kết quả trận đấu, client ghi 1 lần)
+    match /versusMatchResults/{resultId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
     // Mặc định: Chặn tất cả truy cập khác
     match /{document=**} {
       allow read, write: if false;

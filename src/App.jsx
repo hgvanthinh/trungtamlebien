@@ -34,6 +34,8 @@ import AdminStore from './pages/admin/AdminStore';
 import PigPet from './pages/PigPet';
 import Transfer from './pages/Transfer';
 import AdminPigGame from './pages/admin/AdminPigGame';
+import VersusGame from './pages/VersusGame';
+import AdminVersusGame from './pages/admin/AdminVersusGame';
 
 function App() {
   return (
@@ -63,6 +65,7 @@ function App() {
                 <Route path="store" element={<Store />} />
                 <Route path="inventory" element={<Inventory />} />
                 <Route path="pig" element={<PigPet />} />
+                <Route path="versus" element={<VersusGame />} />
                 <Route path="transfer" element={<Transfer />} />
                 <Route path="exams" element={<Exams />} />
                 <Route path="exam/:examId" element={<ExamTaking />} />
@@ -93,6 +96,7 @@ function App() {
                 <Route path="background-settings" element={<BackgroundSettings />} />
                 <Route path="store" element={<AdminStore />} />
                 <Route path="pig-game" element={<AdminPigGame />} />
+                <Route path="versus" element={<AdminVersusGame />} />
               </Route>
 
               {/* Catch all */}
