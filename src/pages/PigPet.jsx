@@ -43,8 +43,8 @@ export default function PigPet() {
             setFoodItem(f);
             setGrade(g);
 
-            // Đồng bộ khối của heo nếu HS chuyển lớp
-            if (p && g && String(p.grade) !== String(g)) {
+            // Đồng bộ khối của heo nếu HS chuyển lớp (g = 0 nghĩa là chưa có lớp → giữ nguyên)
+            if (p && g > 0 && String(p.grade) !== String(g)) {
                 updateDoc(doc(db, 'pigs', uid), { grade: g }).catch(() => { });
                 p.grade = g;
             }
@@ -168,6 +168,17 @@ export default function PigPet() {
                                 busy={busy}
                             />
                         </>
+                    ) : !grade ? (
+                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 text-center">
+                            <img src={getPigImage(1)} alt="Heo đất" className="w-44 mx-auto mb-4 opacity-40 grayscale" />
+                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                                Chưa thể nuôi heo đất
+                            </h2>
+                            <p className="text-gray-600 dark:text-gray-400">
+                                Bạn chưa được xếp vào lớp nào. Heo đất xếp hạng theo khối, nên bạn cần
+                                được giáo viên thêm vào lớp trước khi mua heo.
+                            </p>
+                        </div>
                     ) : (
                         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 text-center">
                             <img src={getPigImage(1)} alt="Heo đất" className="w-44 mx-auto mb-4 opacity-90" />

@@ -37,9 +37,15 @@ const writeLog = (transaction, { uid, userName, type, detail = {} }) => {
 };
 
 /**
- * Mua heo đất (1 heo / tài khoản, trả bằng Đồng Vàng)
+ * Mua heo đất (1 heo / tài khoản, trả bằng Đồng Vàng).
+ * HS chưa được gán lớp (grade = 0) không được nuôi heo — vì heo xếp hạng theo khối.
  */
 export const buyPig = async (uid, userName, grade, settings) => {
+    const gradeNum = Number(grade) || 0;
+    if (gradeNum <= 0) {
+        throw new Error('Bạn chưa được xếp lớp nên chưa thể nuôi heo. Hãy liên hệ giáo viên để được thêm vào lớp!');
+    }
+
     return await runTransaction(db, async (transaction) => {
         const userDoc = await transaction.get(userRef(uid));
         const pigDoc = await transaction.get(pigRef(uid));
@@ -57,7 +63,7 @@ export const buyPig = async (uid, userName, grade, settings) => {
         transaction.set(pigRef(uid), {
             ownerUid: uid,
             ownerName: userName || '',
-            grade: grade ?? null,
+            grade: gradeNum,
             xp: 0,
             level: 1,
             food: 0,

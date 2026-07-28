@@ -12,7 +12,13 @@ import {
     serverTimestamp
 } from 'firebase/firestore';
 import { getAllPigs } from './pigService';
-import { getDateKeyVN, getWeekIdVN, updatePigGameSettings } from './gameSettingsService';
+import {
+    getDateKeyVN,
+    getWeekIdVN,
+    getWeekStartDate,
+    getWeekStatus,
+    updatePigGameSettings
+} from './gameSettingsService';
 
 const BATCH_LIMIT = 450;
 
@@ -47,14 +53,21 @@ const resolveCurrentGrades = async (pigs) => {
 /**
  * Xem trước kết quả chốt tuần (chỉ đọc, không ghi).
  * Mỗi khối: top N heo (level desc → xp desc → đạt XP trước) được +1 lượt đập heo.
+ * Heo của HS chưa được xếp lớp (grade = 0) không vào bảng xếp hạng khối nào,
+ * nhưng vẫn bị reset cùng toàn bộ heo khác.
  */
-export const previewWeeklyResults = async (settings) => {
+export const previewWeeklyResults = async (settings, weekId = null) => {
     const rawPigs = await getAllPigs(); // đã sort sẵn
     const allPigs = await resolveCurrentGrades(rawPigs);
 
     const gradeGroups = {};
+    const ungradedPigs = [];
     allPigs.forEach(pig => {
         const grade = pig.grade ?? 0;
+        if (!grade) {
+            ungradedPigs.push(pig);
+            return;
+        }
         if (!gradeGroups[grade]) gradeGroups[grade] = [];
         gradeGroups[grade].push(pig);
     });
@@ -77,9 +90,10 @@ export const previewWeeklyResults = async (settings) => {
     });
 
     return {
-        weekId: settings.currentWeekId,
+        weekId: weekId || settings.currentWeekId,
         grades,
         totalPigs: allPigs.length,
+        ungradedCount: ungradedPigs.length,
         allPigUids: allPigs.map(p => p.id)
     };
 };
@@ -87,6 +101,12 @@ export const previewWeeklyResults = async (settings) => {
 /**
  * Chốt tuần (admin): +1 lượt đập cho top N mỗi khối, reset TOÀN BỘ heo về cấp 1 / 0 XP.
  * Heo top KHÔNG bị xóa lúc chốt — chỉ vỡ khi HS bấm đập (đập xong phải mua heo mới).
+ *
+ * Lưu ý: preview là ảnh chụp tại lúc admin bấm "Xem trước", HS vẫn có thể đập heo
+ * (xóa pig doc) hoặc mua heo mới trước khi admin bấm chốt. Vì vậy danh sách heo cần
+ * reset được ĐỌC LẠI ngay tại đây, không dùng preview.allPigUids.
+ * Mọi ghi đều dùng set(merge) thay vì update() — update() vào doc đã bị xóa sẽ làm
+ * hỏng cả batch và không thể rollback các batch đã commit trước đó.
  */
 export const finalizeWeek = async (preview, adminUid) => {
     const weekId = preview.weekId;
@@ -99,15 +119,19 @@ export const finalizeWeek = async (preview, adminUid) => {
 
     const allWinners = Object.values(preview.grades).flatMap(g => g.smashWinners);
 
+    // Đọc lại danh sách heo tại thời điểm chốt (preview có thể đã cũ)
+    const livePigs = await getAllPigs();
+    const livePigUids = livePigs.map(p => p.id);
+
     // Gom các thao tác ghi, chia batch (giới hạn 500 ops/batch)
     const operations = [];
 
     allWinners.forEach(winner => {
         operations.push(batch => {
-            batch.update(doc(db, 'users', winner.uid), {
+            batch.set(doc(db, 'users', winner.uid), {
                 smashAttempts: increment(1),
                 updatedAt: serverTimestamp()
-            });
+            }, { merge: true });
             batch.set(doc(collection(db, 'pigGameLogs')), {
                 uid: winner.uid,
                 userName: winner.name,
@@ -120,17 +144,17 @@ export const finalizeWeek = async (preview, adminUid) => {
         });
     });
 
-    preview.allPigUids.forEach(uid => {
+    livePigUids.forEach(uid => {
         operations.push(batch => {
-            batch.update(doc(db, 'pigs', uid), {
+            batch.set(doc(db, 'pigs', uid), {
                 xp: 0,
                 level: 1,
                 lastXpAt: null,
                 windowFeeds: {},
                 extraFeeds: { dateKey: null, count: 0 },
                 updatedAt: serverTimestamp()
-            });
-            batch.update(doc(db, 'users', uid), { pigLevel: 1 });
+            }, { merge: true });
+            batch.set(doc(db, 'users', uid), { pigLevel: 1 }, { merge: true });
         });
     });
 
@@ -153,18 +177,102 @@ export const finalizeWeek = async (preview, adminUid) => {
         ...resultData,
         finalizedAt: serverTimestamp(),
         finalizedBy: adminUid,
-        totalPigsReset: preview.totalPigs
+        totalPigsReset: livePigUids.length
     });
     await batch.commit();
 
-    // Sang tuần mới
-    const nowWeekId = getWeekIdVN();
-    const nextWeekId = weekId === nowWeekId
-        ? getWeekIdVN(new Date(Date.now() + 7 * 86400000))
-        : nowWeekId;
+    // Sang tuần kế tiếp của tuần vừa chốt (chốt trễ thì không nhảy cóc qua tuần chưa chốt)
+    const monday = getWeekStartDate(weekId);
+    const nextMonday = new Date(monday);
+    nextMonday.setUTCDate(monday.getUTCDate() + 7);
+    const nextWeekId = getWeekIdVN(nextMonday);
     await updatePigGameSettings({ currentWeekId: nextWeekId });
 
-    return { weekId, nextWeekId, winnersCount: allWinners.length, pigsReset: preview.totalPigs };
+    return { weekId, nextWeekId, winnersCount: allWinners.length, pigsReset: livePigUids.length };
+};
+
+/**
+ * Tuần của hoạt động game cũ nhất còn lưu — dùng làm mốc chặn, để hệ thống không
+ * đòi admin chốt những tuần trước cả khi game bắt đầu chạy.
+ */
+const getEarliestActivityWeekId = async () => {
+    const q = query(collection(db, 'pigGameLogs'), orderBy('createdAt', 'asc'), limit(1));
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+    const log = snapshot.docs[0].data();
+    return log.weekId || (log.createdAt?.toDate ? getWeekIdVN(log.createdAt.toDate()) : null);
+};
+
+/**
+ * Xác định tuần nên chốt, để admin không phải tự nghĩ weekId.
+ *
+ * currentWeekId có thể đang trỏ vào tuần đang diễn ra dù tuần trước chưa chốt
+ * (mặc định lấy tuần hiện tại khi settings chưa có giá trị). Hàm này dò ngược
+ * để tìm tuần đã KẾT THÚC nhưng CHƯA được chốt — đó mới là tuần cần chốt.
+ * Không có tuần nào như vậy thì trả về tuần đang diễn ra.
+ */
+export const resolveWeekToFinalize = async () => {
+    const thisWeekId = getWeekIdVN();
+    const thisMonday = getWeekStartDate(thisWeekId);
+
+    // Điểm bắt đầu dò = tuần cũ nhất còn có thể chưa chốt, lấy theo thứ tự ưu tiên:
+    //  1. Tuần ngay sau tuần đã chốt gần nhất (trước đó chắc chắn xong rồi)
+    //  2. Tuần có hoạt động game đầu tiên (hệ thống mới, chưa chốt lần nào)
+    //  3. Tuần hiện tại
+    // Không thể chỉ dựa vào currentWeekId: khi settings chưa từng được ghi, nó mặc
+    // định là tuần hiện tại và tuần vừa kết thúc sẽ bị bỏ sót âm thầm.
+    const [latestResult, earliestWeekId] = await Promise.all([
+        getLatestWeeklyResult(),
+        getEarliestActivityWeekId()
+    ]);
+
+    let startMonday = null;
+    if (latestResult?.weekId) {
+        const m = getWeekStartDate(latestResult.weekId);
+        if (m) {
+            startMonday = new Date(m);
+            startMonday.setUTCDate(m.getUTCDate() + 7);
+        }
+    }
+    if (!startMonday && earliestWeekId) startMonday = getWeekStartDate(earliestWeekId);
+    if (!startMonday) startMonday = thisMonday;
+
+    // Chặn trên: không dò quá tuần hiện tại. Chặn dưới: tối đa 12 tuần để tránh
+    // quét vô hạn nếu dữ liệu cũ bất thường.
+    if (startMonday > thisMonday) startMonday = thisMonday;
+    const MAX_WEEKS = 12;
+
+    const candidates = [];
+    const cursor = new Date(startMonday);
+    for (let i = 0; i < MAX_WEEKS; i++) {
+        const id = getWeekIdVN(cursor);
+        candidates.push(id);
+        if (id === thisWeekId) break;
+        cursor.setUTCDate(cursor.getUTCDate() + 7);
+    }
+    if (!candidates.includes(thisWeekId)) candidates.push(thisWeekId);
+
+    const snaps = await Promise.all(
+        candidates.map(id => getDoc(doc(db, 'pigWeeklyResults', id)))
+    );
+
+    // Tuần đã kết thúc mà chưa chốt → ưu tiên chốt tuần cũ nhất
+    for (let i = 0; i < candidates.length; i++) {
+        const id = candidates[i];
+        if (snaps[i].exists()) continue;
+        const status = getWeekStatus(id);
+        if (status.isPast) {
+            return { weekId: id, ...status, alreadyFinalized: false };
+        }
+    }
+
+    // Không còn tuần quá hạn → tuần đang diễn ra
+    const pendingIndex = candidates.indexOf(thisWeekId);
+    return {
+        weekId: thisWeekId,
+        ...getWeekStatus(thisWeekId),
+        alreadyFinalized: pendingIndex >= 0 ? snaps[pendingIndex].exists() : false
+    };
 };
 
 /**

@@ -95,6 +95,64 @@ export const getWeekIdVN = (date = new Date()) => {
 };
 
 /**
+ * Ngày thứ Hai (UTC) của một weekId ISO, vd '2026-W30' → Date(2026-07-20)
+ */
+export const getWeekStartDate = (weekId) => {
+    const match = /^(\d{4})-W(\d{2})$/.exec(weekId || '');
+    if (!match) return null;
+    const [, year, week] = match;
+
+    // Thứ Năm của tuần 1 luôn nằm trong tuần chứa 04/01
+    const jan4 = new Date(Date.UTC(Number(year), 0, 4));
+    const jan4Day = jan4.getUTCDay() || 7;
+    const week1Monday = new Date(jan4);
+    week1Monday.setUTCDate(jan4.getUTCDate() - jan4Day + 1);
+
+    const monday = new Date(week1Monday);
+    monday.setUTCDate(week1Monday.getUTCDate() + (Number(week) - 1) * 7);
+    return monday;
+};
+
+/**
+ * Mô tả tuần cho admin đọc, vd '20/07 – 26/07/2026'
+ */
+export const formatWeekRange = (weekId) => {
+    const monday = getWeekStartDate(weekId);
+    if (!monday) return weekId || '—';
+    const sunday = new Date(monday);
+    sunday.setUTCDate(monday.getUTCDate() + 6);
+
+    const dm = (d) => `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    return `${dm(monday)} – ${dm(sunday)}/${sunday.getUTCFullYear()}`;
+};
+
+/**
+ * Trạng thái của một tuần so với hiện tại, dùng để nhắc admin chốt đúng lúc.
+ * - isCurrent: tuần đang diễn ra
+ * - isPast: tuần đã kết thúc (chốt trễ)
+ * - daysLate: số ngày đã trễ kể từ lúc tuần kết thúc (0 nếu chưa kết thúc)
+ * - daysRemaining: số ngày còn lại tới hết tuần (0 nếu đã kết thúc)
+ */
+export const getWeekStatus = (weekId, now = new Date()) => {
+    const monday = getWeekStartDate(weekId);
+    if (!monday) return { isCurrent: false, isPast: false, daysLate: 0, daysRemaining: 0 };
+
+    const todayVN = new Date(getDateKeyVN(now) + 'T00:00:00Z');
+    const nextMonday = new Date(monday);
+    nextMonday.setUTCDate(monday.getUTCDate() + 7);
+
+    const isPast = todayVN >= nextMonday;
+    const isCurrent = todayVN >= monday && !isPast;
+
+    return {
+        isCurrent,
+        isPast,
+        daysLate: isPast ? Math.round((todayVN - nextMonday) / 86400000) + 1 : 0,
+        daysRemaining: isCurrent ? Math.round((nextMonday - todayVN) / 86400000) : 0
+    };
+};
+
+/**
  * Khung giờ cho ăn cố định đang mở tại thời điểm date (theo giờ VN), null nếu ngoài khung
  */
 export const getActiveWindow = (settings, date = new Date()) => {

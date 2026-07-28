@@ -3,13 +3,15 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
     getPigGameSettings,
     updatePigGameSettings,
-    getDateKeyVN
+    getDateKeyVN,
+    formatWeekRange
 } from '../../services/gameSettingsService';
 import { getPigLogs } from '../../services/pigService';
 import {
     previewWeeklyResults,
     finalizeWeek,
-    getWeeklyResultsHistory
+    getWeeklyResultsHistory,
+    resolveWeekToFinalize
 } from '../../services/pigWeeklyService';
 import { getAllTransfers } from '../../services/transferService';
 import Toast from '../../components/common/Toast';
@@ -30,7 +32,6 @@ const LOG_TYPE_LABELS = {
 export default function AdminPigGame() {
     const { currentUser } = useAuth();
     const [activeTab, setActiveTab] = useState('settings');
-    const [settings, setSettings] = useState(null);
     const [form, setForm] = useState(null);
     const [saving, setSaving] = useState(false);
     const [toast, setToast] = useState(null);
@@ -41,6 +42,7 @@ export default function AdminPigGame() {
     const [finalizing, setFinalizing] = useState(false);
     const [confirmFinalize, setConfirmFinalize] = useState(false);
     const [history, setHistory] = useState([]);
+    const [weekTarget, setWeekTarget] = useState(null);
 
     // Lịch sử
     const [transfers, setTransfers] = useState([]);
@@ -53,7 +55,6 @@ export default function AdminPigGame() {
 
     const loadSettings = async () => {
         const s = await getPigGameSettings(true);
-        setSettings(s);
         setForm({
             ...s,
             smashHighChancePct: Math.round(s.smashHighChance * 100)
@@ -63,6 +64,7 @@ export default function AdminPigGame() {
     useEffect(() => {
         if (activeTab === 'weekly') {
             getWeeklyResultsHistory().then(setHistory).catch(() => { });
+            resolveWeekToFinalize().then(setWeekTarget).catch(() => { });
         } else if (activeTab === 'transfers') {
             getAllTransfers().then(setTransfers).catch(() => { });
         } else if (activeTab === 'logs') {
@@ -103,8 +105,9 @@ export default function AdminPigGame() {
         try {
             setPreviewLoading(true);
             const s = await getPigGameSettings(true);
-            setSettings(s);
-            const p = await previewWeeklyResults(s);
+            const target = await resolveWeekToFinalize();
+            setWeekTarget(target);
+            const p = await previewWeeklyResults(s, target.weekId);
             setPreview(p);
         } catch (error) {
             setToast({ type: 'error', message: 'Lỗi xem trước: ' + error.message });
@@ -120,10 +123,12 @@ export default function AdminPigGame() {
             const result = await finalizeWeek(preview, currentUser.uid);
             setToast({
                 type: 'success',
-                message: `✅ Đã chốt tuần ${result.weekId}: ${result.winnersCount} HS được lượt đập, ${result.pigsReset} heo về cấp 1. Tuần mới: ${result.nextWeekId}`
+                message: `✅ Đã chốt tuần ${formatWeekRange(result.weekId)}: ${result.winnersCount} HS được lượt đập, ${result.pigsReset} heo về cấp 1. Tuần mới: ${formatWeekRange(result.nextWeekId)}`
             });
             setPreview(null);
-            await loadSettings();
+            const s = await getPigGameSettings(true);
+            setForm({ ...s, smashHighChancePct: Math.round(s.smashHighChance * 100) });
+            resolveWeekToFinalize().then(setWeekTarget).catch(() => { });
             getWeeklyResultsHistory().then(setHistory).catch(() => { });
         } catch (error) {
             setToast({ type: 'error', message: error.message });
@@ -306,10 +311,39 @@ export default function AdminPigGame() {
             {activeTab === 'weekly' && (
                 <div className="space-y-6">
                     <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6">
+                        {/* Nhắc admin: có tuần đã kết thúc mà chưa chốt */}
+                        {weekTarget?.isPast && (
+                            <div className="mb-4 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 p-4">
+                                <p className="font-bold text-amber-800 dark:text-amber-200 mb-1">
+                                    ⏰ Tuần {formatWeekRange(weekTarget.weekId)} đã kết thúc nhưng chưa được chốt
+                                </p>
+                                <p className="text-sm text-amber-700 dark:text-amber-300">
+                                    Trễ {weekTarget.daysLate} ngày. Bấm “Xem trước kết quả” bên dưới để chốt cho tuần này.
+                                    Điểm heo hiện tại đã gồm cả những ngày sau đó, nên chốt càng sớm càng công bằng.
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Nhắc admin: tuần đang diễn ra, chốt bây giờ là sớm */}
+                        {weekTarget?.isCurrent && weekTarget.daysRemaining > 0 && (
+                            <div className="mb-4 rounded-xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 p-4">
+                                <p className="font-bold text-blue-800 dark:text-blue-200 mb-1">
+                                    ✅ Không có tuần nào bị bỏ sót
+                                </p>
+                                <p className="text-sm text-blue-700 dark:text-blue-300">
+                                    Tuần {formatWeekRange(weekTarget.weekId)} đang diễn ra, còn {weekTarget.daysRemaining} ngày nữa mới hết.
+                                    Bình thường nên chờ hết Chủ nhật rồi chốt.
+                                </p>
+                            </div>
+                        )}
+
                         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
                             <div>
                                 <h3 className="font-bold text-lg text-gray-900 dark:text-white">
-                                    Tuần hiện tại: <span className="text-pink-500">{settings?.currentWeekId}</span>
+                                    Sẽ chốt cho tuần:{' '}
+                                    <span className="text-pink-500">
+                                        {weekTarget ? formatWeekRange(weekTarget.weekId) : '...'}
+                                    </span>
                                 </h3>
                                 <p className="text-sm text-gray-500 dark:text-gray-400">
                                     Chốt tuần: top khối nhận lượt đập heo, TẤT CẢ heo về cấp 1 / 0 XP
@@ -329,6 +363,12 @@ export default function AdminPigGame() {
                                 <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
                                     Tổng <b>{preview.totalPigs}</b> heo sẽ reset về cấp 1. Danh sách nhận +1 lượt đập:
                                 </p>
+                                {preview.ungradedCount > 0 && (
+                                    <p className="text-sm bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-lg px-3 py-2 mb-3">
+                                        ⚠️ Có <b>{preview.ungradedCount}</b> heo của HS chưa được xếp lớp — không xét
+                                        thưởng khối nào, nhưng vẫn được reset.
+                                    </p>
+                                )}
                                 {Object.keys(preview.grades).length === 0 ? (
                                     <p className="text-gray-500 italic">Chưa có heo nào trong hệ thống.</p>
                                 ) : (
@@ -373,7 +413,7 @@ export default function AdminPigGame() {
                                     disabled={finalizing}
                                     className="mt-4 px-8 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold disabled:opacity-50"
                                 >
-                                    {finalizing ? 'Đang chốt...' : `🏁 CHỐT TUẦN ${preview.weekId}`}
+                                    {finalizing ? 'Đang chốt...' : `🏁 CHỐT TUẦN ${formatWeekRange(preview.weekId)}`}
                                 </button>
                             </div>
                         )}
@@ -389,7 +429,7 @@ export default function AdminPigGame() {
                                 {history.map(week => (
                                     <div key={week.id} className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
                                         <p className="font-bold text-gray-900 dark:text-white mb-1">
-                                            Tuần {week.weekId} — {week.totalPigsReset} heo reset
+                                            Tuần {formatWeekRange(week.weekId)} — {week.totalPigsReset} heo reset
                                             <span className="text-xs text-gray-500 ml-2">
                                                 {week.finalizedAt?.toDate?.()?.toLocaleString('vi-VN')}
                                             </span>
@@ -509,8 +549,14 @@ export default function AdminPigGame() {
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
                     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6">
                         <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-3">
-                            ⚠️ Xác nhận chốt tuần {preview.weekId}
+                            ⚠️ Xác nhận chốt tuần {formatWeekRange(preview.weekId)}
                         </h3>
+                        {weekTarget?.isCurrent && weekTarget.daysRemaining > 0 && (
+                            <p className="text-sm bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 rounded-lg px-3 py-2 mb-3">
+                                🟠 Tuần này còn <b>{weekTarget.daysRemaining} ngày</b> nữa mới hết. Chốt bây giờ nghĩa là
+                                HS mất phần điểm của những ngày còn lại.
+                            </p>
+                        )}
                         <ul className="text-gray-600 dark:text-gray-300 text-sm space-y-1 mb-5 list-disc list-inside">
                             <li><b>{Object.values(preview.grades).reduce((s, g) => s + g.smashWinners.length, 0)}</b> HS nhận +1 lượt đập heo</li>
                             <li><b>{preview.totalPigs}</b> heo về cấp 1 / 0 XP</li>
