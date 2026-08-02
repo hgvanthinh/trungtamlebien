@@ -1,42 +1,86 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { getAllPigs } from '../../services/pigService';
 import { getLatestWeeklyResult } from '../../services/pigWeeklyService';
 import { getPigImage } from '../../config/pigAssets';
 
+// Khóa nút "Tải lại" sau mỗi lần bấm để tránh HS bấm liên tục làm tốn lượt đọc Firestore
+const RELOAD_COOLDOWN_SEC = 15;
+
+const formatTime = (date) =>
+    date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+
 /**
  * Bảng xếp hạng heo theo khối: level → XP → đạt XP trước.
  * Vùng top N (được đập heo cuối tuần) được tô màu.
+ *
+ * Dữ liệu KHÔNG realtime (tránh listener trên toàn collection pigs): tải khi mở trang,
+ * khi HS bấm "Tải lại", và tự động mỗi khi refreshKey đổi (sau hành động của chính HS).
  */
-export default function PigLeaderboard({ settings, myUid, myGrade }) {
+export default function PigLeaderboard({ settings, myUid, myGrade, refreshKey = 0 }) {
     const [pigsByGrade, setPigsByGrade] = useState({});
     const [grades, setGrades] = useState([]);
     const [activeGrade, setActiveGrade] = useState(null);
     const [lastWeek, setLastWeek] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [updatedAt, setUpdatedAt] = useState(null);
+    const [cooldown, setCooldown] = useState(0);
 
-    useEffect(() => {
-        const load = async () => {
-            try {
-                const [pigs, latest] = await Promise.all([getAllPigs(), getLatestWeeklyResult()]);
-                const groups = {};
-                pigs.forEach(pig => {
-                    const g = pig.grade ?? 0;
-                    if (!groups[g]) groups[g] = [];
-                    groups[g].push(pig);
-                });
-                const gradeList = Object.keys(groups).map(Number).sort((a, b) => b - a);
-                setPigsByGrade(groups);
-                setGrades(gradeList);
-                setActiveGrade(gradeList.includes(myGrade) ? myGrade : gradeList[0] ?? null);
-                setLastWeek(latest);
-            } catch (error) {
-                console.error('Error loading pig leaderboard:', error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        load();
+    // Giữ khối đang xem khi tải lại; chỉ auto-chọn khối ở lần tải đầu
+    const activeGradeRef = useRef(null);
+    activeGradeRef.current = activeGrade;
+
+    const load = useCallback(async () => {
+        try {
+            const [pigs, latest] = await Promise.all([getAllPigs(), getLatestWeeklyResult()]);
+            const groups = {};
+            pigs.forEach(pig => {
+                const g = pig.grade ?? 0;
+                if (!groups[g]) groups[g] = [];
+                groups[g].push(pig);
+            });
+            const gradeList = Object.keys(groups).map(Number).sort((a, b) => b - a);
+            setPigsByGrade(groups);
+            setGrades(gradeList);
+            setActiveGrade(prev =>
+                prev !== null && gradeList.includes(prev)
+                    ? prev
+                    : (gradeList.includes(myGrade) ? myGrade : gradeList[0] ?? null)
+            );
+            setLastWeek(latest);
+            setUpdatedAt(new Date());
+        } catch (error) {
+            console.error('Error loading pig leaderboard:', error);
+        }
     }, [myGrade]);
+
+    // Tải lần đầu + tự tải lại sau hành động của HS (cho ăn, mua/đập heo, nộp bài)
+    useEffect(() => {
+        let cancelled = false;
+        const run = async () => {
+            setRefreshing(true);
+            await load();
+            if (!cancelled) setRefreshing(false);
+            if (!cancelled) setLoading(false);
+        };
+        run();
+        return () => { cancelled = true; };
+    }, [load, refreshKey]);
+
+    // Đếm ngược cooldown của nút bấm tay
+    useEffect(() => {
+        if (cooldown <= 0) return;
+        const timer = setTimeout(() => setCooldown(c => c - 1), 1000);
+        return () => clearTimeout(timer);
+    }, [cooldown]);
+
+    const handleManualReload = async () => {
+        if (cooldown > 0 || refreshing) return;
+        setRefreshing(true);
+        await load();
+        setRefreshing(false);
+        setCooldown(RELOAD_COOLDOWN_SEC);
+    };
 
     if (loading) {
         return (
@@ -51,9 +95,29 @@ export default function PigLeaderboard({ settings, myUid, myGrade }) {
 
     return (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
-                🏆 Bảng xếp hạng Heo theo khối
-            </h3>
+            <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                        🏆 Bảng xếp hạng Heo theo khối
+                    </h3>
+                    {updatedAt && (
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                            Cập nhật lúc {formatTime(updatedAt)}
+                        </p>
+                    )}
+                </div>
+                <button
+                    onClick={handleManualReload}
+                    disabled={cooldown > 0 || refreshing}
+                    title={cooldown > 0 ? `Chờ ${cooldown}s rồi tải lại được` : 'Tải lại bảng xếp hạng'}
+                    className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors ${cooldown > 0 || refreshing
+                        ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                        : 'bg-pink-100 dark:bg-pink-900/40 text-pink-600 dark:text-pink-300 hover:bg-pink-200 dark:hover:bg-pink-900/70'
+                        }`}
+                >
+                    {refreshing ? '⏳ Đang tải...' : cooldown > 0 ? `🔄 ${cooldown}s` : '🔄 Tải lại'}
+                </button>
+            </div>
 
             {/* Tabs khối */}
             {grades.length > 0 && (

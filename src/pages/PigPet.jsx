@@ -25,6 +25,10 @@ export default function PigPet() {
     const [toast, setToast] = useState(null);
     const [xpFloat, setXpFloat] = useState(null);
     const [smashResult, setSmashResult] = useState(null);
+    // Tăng lên để yêu cầu PigLeaderboard tải lại sau mỗi hành động làm đổi thứ hạng
+    const [rankRefreshKey, setRankRefreshKey] = useState(0);
+
+    const refreshRanking = () => setRankRefreshKey(k => k + 1);
 
     const uid = currentUser?.uid;
     const userName = userProfile?.fullName || '';
@@ -66,6 +70,7 @@ export default function PigPet() {
             updateUserProfile({ gold: result.newGold, pigLevel: 1 });
             setToast({ type: 'success', message: '🐷 Chúc mừng! Bạn đã có heo đất. Hãy cho heo ăn để lên cấp nhé!' });
             await load();
+            refreshRanking();
         } catch (error) {
             setToast({ type: 'error', message: error.message });
         } finally {
@@ -92,6 +97,7 @@ export default function PigPet() {
             }
             // Đồng bộ lại windowFeeds/extraFeeds từ server
             getPig(uid).then(p => p && setPig(p)).catch(() => { });
+            refreshRanking();
         } catch (error) {
             setToast({ type: 'error', message: error.message });
         } finally {
@@ -120,6 +126,7 @@ export default function PigPet() {
             updateUserProfile({ gold: result.newGold, smashAttempts: result.attemptsLeft, pigLevel: 0 });
             setPig(null);
             setSmashResult(result);
+            refreshRanking();
         } catch (error) {
             setToast({ type: 'error', message: error.message });
         } finally {
@@ -212,7 +219,7 @@ export default function PigPet() {
                 </div>
 
                 <div className="lg:col-span-2">
-                    <PigLeaderboard settings={settings} myUid={uid} myGrade={grade} />
+                    <PigLeaderboard settings={settings} myUid={uid} myGrade={grade} refreshKey={rankRefreshKey} />
                 </div>
             </div>
 
