@@ -157,12 +157,16 @@ export function Leaderboard({ students, ripples, rippleGif, rankBgImg }) {
                             'bg-gray-50 dark:bg-gray-800/30'
                         }`}
                     >
-                        <span className="text-2xl font-bold text-gray-900 dark:text-white w-8">{index + 1}</span>
-                        <span className="flex-1 font-medium text-gray-900 dark:text-white truncate">
-                            {student.fullName.split(' ').slice(-2).join(' ')}
-                            <RunningPigBadge level={student.pigLevel} />
+                        <span className="text-2xl font-bold text-gray-900 dark:text-white w-8 shrink-0">{index + 1}</span>
+                        <span className="flex-1 min-w-0 flex items-center gap-1 font-medium text-gray-900 dark:text-white">
+                            <span className="truncate">
+                                {student.fullName.split(' ').slice(-2).join(' ')}
+                            </span>
+                            <span className="shrink-0">
+                                <RunningPigBadge level={student.pigLevel} />
+                            </span>
                         </span>
-                        <span className="text-lg font-bold text-gray-900 dark:text-white">
+                        <span className="text-lg font-bold text-gray-900 dark:text-white shrink-0">
                             {student.totalBehaviorPoints || 0}
                         </span>
                     </div>
