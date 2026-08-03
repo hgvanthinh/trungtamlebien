@@ -270,8 +270,29 @@ export const getAllLeaderboards = async (studentClasses, studentGrade, forceRefr
  * Lấy khối (grade) của 1 học sinh dựa trên lớp đầu tiên (dùng cho game heo đất)
  */
 export const getStudentGrade = async (userClasses) => {
-  const gradeMap = await fetchClassesGradeMap();
-  return userClasses && userClasses.length > 0 ? (gradeMap[userClasses[0]] || 0) : 0;
+  if (!userClasses || userClasses.length === 0) return 0;
+
+  // Nếu đã có cache (admin đã query cả collection, hoặc seed từ trước) thì dùng luôn
+  if (classesGradeMap) {
+    const cached = userClasses.map(id => classesGradeMap[id] || 0).find(g => g > 0);
+    if (cached) return cached;
+  }
+
+  // Học sinh KHÔNG được query cả collection 'classes' (rules chỉ cho đọc lớp của mình),
+  // nên phải đọc trực tiếp từng doc lớp theo id.
+  for (const classId of userClasses) {
+    try {
+      const snap = await getDoc(doc(db, 'classes', classId));
+      const g = snap.exists() ? (parseInt(snap.data().grade) || 0) : 0;
+      if (g > 0) {
+        classesGradeMap = { ...(classesGradeMap || {}), [classId]: g };
+        return g;
+      }
+    } catch {
+      // không đọc được lớp này → thử lớp tiếp theo
+    }
+  }
+  return 0;
 };
 
 /**
