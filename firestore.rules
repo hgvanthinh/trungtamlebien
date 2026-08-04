@@ -288,6 +288,12 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // Collection: questionBank (kho câu hỏi dùng lại, chỉ admin quản lý)
+    match /questionBank/{questionId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
     // Mặc định: Chặn tất cả truy cập khác
     match /{document=**} {
       allow read, write: if false;

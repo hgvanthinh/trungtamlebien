@@ -7,6 +7,13 @@ import Icon from '../../../components/common/Icon';
 import TopRankBorder from '../../../components/common/TopRankBorder';
 import RunningPigBadge from '../../../components/common/RunningPigBadge';
 
+// Rút gọn còn 2 từ cuối của họ tên; fallback khi fullName thiếu/rỗng.
+function shortName(student) {
+    const parts = (student.fullName || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return student.displayName || student.name || 'Chưa có tên';
+    return parts.slice(-2).join(' ');
+}
+
 export function Leaderboard({ students, ripples, rippleGif, rankBgImg }) {
     // Top 10 by totalBehaviorPoints
     const topStudents = useMemo(() => {
@@ -160,7 +167,7 @@ export function Leaderboard({ students, ripples, rippleGif, rankBgImg }) {
                         <span className="text-2xl font-bold text-gray-900 dark:text-white w-8 shrink-0">{index + 1}</span>
                         <span className="flex-1 min-w-0 flex items-center gap-1 font-medium text-gray-900 dark:text-white">
                             <span className="truncate">
-                                {student.fullName.split(' ').slice(-2).join(' ')}
+                                {shortName(student)}
                             </span>
                             <span className="shrink-0">
                                 <RunningPigBadge level={student.pigLevel} />

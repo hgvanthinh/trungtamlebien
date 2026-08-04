@@ -11,6 +11,7 @@ import {
   updateAssignment,
   deleteAssignment
 } from '../../services/assignmentService';
+import QuestionBankPanel from '../../components/questionbank/QuestionBankPanel';
 import ExamUploadModal from '../../components/exam/ExamUploadModal';
 import ExamMixedModal from '../../components/exam/ExamMixedModal';
 import ExamCard from '../../components/exam/ExamCard';
@@ -37,7 +38,7 @@ const ExamBank = () => {
   const [assignmentToEdit, setAssignmentToEdit] = useState(null);
   const [showConfirmDeleteAssignment, setShowConfirmDeleteAssignment] = useState(false);
   const [assignmentToDelete, setAssignmentToDelete] = useState(null);
-  const [activeTab, setActiveTab] = useState('exams'); // 'exams' or 'assignments'
+  const [activeTab, setActiveTab] = useState('exams'); // 'exams' | 'assignments' | 'questions'
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
@@ -205,6 +206,16 @@ const ExamBank = () => {
           <Icon name="assignment" className="inline mr-2" />
           Bài đã giao ({assignments.length})
         </button>
+        <button
+          onClick={() => setActiveTab('questions')}
+          className={`px-6 py-3 font-medium transition-all ${activeTab === 'questions'
+            ? 'text-primary border-b-2 border-primary'
+            : 'text-[#608a67] dark:text-[#8ba890] hover:text-[#111812] dark:hover:text-white'
+            }`}
+        >
+          <Icon name="help_center" className="inline mr-2" />
+          Kho câu hỏi
+        </button>
       </div>
 
       {/* Actions - Only show when on exams tab */}
@@ -228,7 +239,12 @@ const ExamBank = () => {
       )}
 
       {/* Content */}
-      {activeTab === 'exams' ? (
+      {activeTab === 'questions' ? (
+        <QuestionBankPanel
+          createdBy={currentUser?.uid}
+          onToast={setToast}
+        />
+      ) : activeTab === 'exams' ? (
         // Exams Grid
         exams.length === 0 ? (
           <div className="clay-card p-12 text-center">

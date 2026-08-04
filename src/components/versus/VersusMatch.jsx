@@ -23,6 +23,7 @@ import { useConfirm } from '../../hooks/useConfirm';
 import Icon from '../common/Icon';
 import Button from '../common/Button';
 import Avatar from '../common/Avatar';
+import { MathText } from '../math';
 
 const ANSWER_LABELS = ['A', 'B', 'C', 'D'];
 const DISCONNECT_GRACE_MS = 45 * 1000; // đối thủ mất kết nối quá 45s → được claim thắng
@@ -824,9 +825,11 @@ export default function VersusMatch({ sessionId, gameId, onExit }) {
                                 />
                             </div>
                         )}
-                        <p className="text-lg sm:text-xl font-bold text-center text-[#111812] dark:text-white mb-5">
-                            {question.questionText}
-                        </p>
+                        <MathText
+                            as="div"
+                            className="text-lg sm:text-xl font-bold text-center text-[#111812] dark:text-white mb-5"
+                            content={question.questionText}
+                        />
 
                         {/* ABCD */}
                         {qType === 'abcd' && (
@@ -850,7 +853,7 @@ export default function VersusMatch({ sessionId, gameId, onExit }) {
                                             <span className="shrink-0 size-7 rounded-full bg-white dark:bg-white/10 shadow-sm flex items-center justify-center text-sm font-extrabold text-primary-dark dark:text-primary">
                                                 {ANSWER_LABELS[idx]}
                                             </span>
-                                            <span className="min-w-0 pt-0.5">{answer.text}</span>
+                                            <MathText className="min-w-0 pt-0.5" content={answer.text} />
                                         </button>
                                     );
                                 })}
@@ -868,7 +871,11 @@ export default function VersusMatch({ sessionId, gameId, onExit }) {
                                             : 'bg-[#f0f5f1] dark:bg-white/5'
                                             }`}
                                     >
-                                        <p className="flex-1 min-w-0 font-medium text-[#111812] dark:text-white">{st.text}</p>
+                                        <MathText
+                                            as="div"
+                                            className="flex-1 min-w-0 font-medium text-[#111812] dark:text-white"
+                                            content={st.text}
+                                        />
                                         <div className="flex gap-1.5 shrink-0">
                                             <button
                                                 disabled={locked}

@@ -26,4 +26,13 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    // Thư viện công thức toán nhập từ ngoài (chuyển từ TS sang JSX, giữ nguyên logic gốc).
+    // Không sửa code thư viện -> nới rule cho riêng thư mục này.
+    files: ['src/components/math/**/*.{js,jsx}'],
+    rules: {
+      'no-unused-vars': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
 ])

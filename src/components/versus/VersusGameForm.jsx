@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { createVersusGame, updateVersusGame } from '../../services/versusGameService';
 import { getVersusSettings, DEFAULT_VERSUS_SETTINGS } from '../../services/versusSettingsService';
+import { parseQuickQuestions } from '../../utils/parseQuickQuestions';
+import QuestionPickerModal from '../questionbank/QuestionPickerModal';
+import { MathEditor } from '../math';
 import Icon from '../common/Icon';
 import Button from '../common/Button';
 import Toast from '../common/Toast';
@@ -39,109 +42,6 @@ const makeShortAnswerQuestion = () => ({
 });
 
 /**
- * Parse text dán nhanh nhiều câu abcd.
- * Mẫu mỗi câu (cách nhau dòng trống):
- *   Câu: Nội dung
- *   A. Đáp án 1 ... D. Đáp án 4
- *   Đáp án: B
- * Chấp nhận "Câu 1:", "Cau:", "A)", "a." linh hoạt.
- * @returns {{ questions: Array, errors: string[] }}
- */
-const parseQuickQuestions = (text) => {
-    const lines = (text || '').split(/\r?\n/);
-
-    // Gom block theo dòng trống, nhớ số dòng bắt đầu (1-based)
-    const blocks = [];
-    let current = null;
-    lines.forEach((raw, i) => {
-        if (raw.trim() === '') {
-            current = null;
-            return;
-        }
-        if (!current) {
-            current = { startLine: i + 1, lines: [] };
-            blocks.push(current);
-        }
-        current.lines.push({ lineNo: i + 1, text: raw.trim() });
-    });
-
-    const questions = [];
-    const errors = [];
-
-    blocks.forEach((block, bIdx) => {
-        let questionText = '';
-        const answers = []; // { letter, text }
-        let correctLetter = null;
-        let blockError = null;
-
-        for (const { lineNo, text: line } of block.lines) {
-            // "Đáp án: B" / "Dap an B"
-            const correctMatch = line.match(/^[đd][áa]p\s*[áa]n\s*[:.\s]\s*([A-Da-d])\s*\.?$/i)
-                || line.match(/^[đd][áa]p\s*[áa]n\s*[:.\s]*([A-Da-d])\s*$/i);
-            if (correctMatch) {
-                correctLetter = correctMatch[1].toUpperCase();
-                continue;
-            }
-            // "A. xxx" / "B) xxx" / "c: xxx"
-            const answerMatch = line.match(/^([A-Da-d])\s*[.):]\s*(.+)$/);
-            if (answerMatch) {
-                answers.push({ letter: answerMatch[1].toUpperCase(), text: answerMatch[2].trim() });
-                continue;
-            }
-            // "Câu: xxx" / "Câu 1: xxx" / "Cau 12. xxx"
-            const questionMatch = line.match(/^c[âa]u\s*\d*\s*[:.]\s*(.+)$/i);
-            if (questionMatch) {
-                if (questionText) {
-                    blockError = `Dòng ${lineNo}: block có 2 dòng "Câu:" — thiếu dòng trống ngăn cách giữa 2 câu?`;
-                    break;
-                }
-                questionText = questionMatch[1].trim();
-                continue;
-            }
-            // Dòng thường: nối tiếp nội dung câu hỏi (câu nhiều dòng)
-            if (answers.length === 0 && correctLetter === null) {
-                questionText = questionText ? `${questionText}\n${line}` : line;
-            } else {
-                // Nối tiếp đáp án cuối (đáp án xuống dòng)
-                if (answers.length > 0) {
-                    answers[answers.length - 1].text += ` ${line}`;
-                }
-            }
-        }
-
-        const blockLabel = `Câu #${bIdx + 1} (dòng ${block.startLine})`;
-        if (blockError) {
-            errors.push(`${blockLabel}: ${blockError}`);
-            return;
-        }
-        if (!questionText) {
-            errors.push(`${blockLabel}: không tìm thấy nội dung câu hỏi (dòng "Câu: ...")`);
-            return;
-        }
-        if (answers.length !== 4) {
-            errors.push(`${blockLabel}: cần đúng 4 đáp án A-D, đọc được ${answers.length}`);
-            return;
-        }
-        if (!correctLetter) {
-            errors.push(`${blockLabel}: thiếu dòng "Đáp án: X"`);
-            return;
-        }
-        if (!answers.some(a => a.letter === correctLetter)) {
-            errors.push(`${blockLabel}: đáp án đúng "${correctLetter}" không khớp đáp án nào`);
-            return;
-        }
-
-        questions.push({
-            questionText,
-            questionImage: '',
-            answers: answers.map(a => ({ text: a.text, isCorrect: a.letter === correctLetter }))
-        });
-    });
-
-    return { questions, errors };
-};
-
-/**
  * Form tạo / sửa bài Đấu Trí 1v1.
  * @param {Object|null} game - null = tạo mới, khác null = sửa (cần game.id)
  * @param {Function} onSaved - gọi sau khi lưu thành công
@@ -165,6 +65,9 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
     const [showQuickPaste, setShowQuickPaste] = useState(false);
     const [quickText, setQuickText] = useState('');
     const [quickResult, setQuickResult] = useState(null); // { questions, errors }
+
+    // Chọn câu hỏi từ Kho câu hỏi
+    const [showPicker, setShowPicker] = useState(false);
 
     // Lấy default từ settings khi tạo mới
     useEffect(() => {
@@ -281,6 +184,15 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
         setShowQuickPaste(false);
     };
 
+    // ===== Chọn từ Kho câu hỏi =====
+
+    const handlePickFromBank = (picked) => {
+        setShowPicker(false);
+        if (!picked || picked.length === 0) return;
+        setQuestions(prev => [...prev, ...picked]);
+        setToast({ type: 'success', message: `Đã thêm ${picked.length} câu từ kho vào danh sách!` });
+    };
+
     // ===== Validate & Lưu =====
 
     const validate = () => {
@@ -317,26 +229,33 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
         // Chuẩn hóa dữ liệu trước khi lưu
         const cleanQuestions = questions.map(q => {
             const type = q.type || 'abcd';
+            // Ảnh đề áp dụng cho mọi loại câu (câu lấy từ Kho có thể là dạng ảnh)
+            const image = q.questionImage?.trim();
+
             if (type === 'true_false') {
-                return {
+                const cleaned = {
                     type: 'true_false',
                     questionText: q.questionText.trim(),
                     statements: q.statements.map(s => ({ text: s.text.trim(), isTrue: !!s.isTrue }))
                 };
+                if (image) cleaned.questionImage = image;
+                return cleaned;
             }
             if (type === 'short_answer') {
-                return {
+                const cleaned = {
                     type: 'short_answer',
                     questionText: q.questionText.trim(),
                     correctAnswer: q.correctAnswer.trim(),
                     alternativeAnswers: (q.alternativeAnswers || []).map(a => a.trim()).filter(Boolean)
                 };
+                if (image) cleaned.questionImage = image;
+                return cleaned;
             }
             const cleaned = {
                 questionText: q.questionText.trim(),
                 answers: q.answers.map(a => ({ text: a.text.trim(), isCorrect: !!a.isCorrect }))
             };
-            if (q.questionImage?.trim()) cleaned.questionImage = q.questionImage.trim();
+            if (image) cleaned.questionImage = image;
             return cleaned;
         });
 
@@ -371,25 +290,29 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
                 <label className={labelCls}>4 đáp án (chọn đáp án đúng)</label>
                 <div className="space-y-2">
                     {q.answers.map((a, aIndex) => (
-                        <div key={aIndex} className="flex items-center gap-2">
+                        <div key={aIndex} className="flex items-start gap-2">
                             <input
                                 type="radio"
                                 name={`correct-${qIndex}`}
                                 checked={a.isCorrect}
                                 onChange={() => setCorrectAnswer(qIndex, aIndex)}
-                                className="w-4 h-4 text-green-600 shrink-0"
+                                className="w-4 h-4 mt-10 text-green-600 shrink-0"
                                 title="Đáp án đúng"
                             />
-                            <span className="w-6 font-bold text-gray-500 dark:text-gray-400 shrink-0">
+                            <span className="w-6 mt-9 font-bold text-gray-500 dark:text-gray-400 shrink-0">
                                 {String.fromCharCode(65 + aIndex)}.
                             </span>
-                            <input
-                                type="text"
-                                className={`${inputCls} ${a.isCorrect ? 'ring-2 ring-green-400 dark:ring-green-600' : ''}`}
-                                placeholder={`Đáp án ${String.fromCharCode(65 + aIndex)}`}
-                                value={a.text}
-                                onChange={e => updateAnswer(qIndex, aIndex, e.target.value)}
-                            />
+                            <div className={`flex-1 min-w-0 rounded-lg ${a.isCorrect ? 'ring-2 ring-green-400 dark:ring-green-600 p-1' : ''}`}>
+                                <MathEditor
+                                    value={a.text}
+                                    onChange={v => updateAnswer(qIndex, aIndex, v)}
+                                    placeholder={`Đáp án ${String.fromCharCode(65 + aIndex)}`}
+                                    rows={1}
+                                    variant="outlined"
+                                    size="small"
+                                    showPreview
+                                />
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -402,18 +325,22 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
             <label className={labelCls}>Các mệnh đề (bật/tắt Đúng-Sai)</label>
             <div className="space-y-2">
                 {q.statements.map((s, sIndex) => (
-                    <div key={sIndex} className="flex items-center gap-2">
-                        <input
-                            type="text"
-                            className={inputCls}
-                            placeholder={`Mệnh đề ${sIndex + 1}`}
-                            value={s.text}
-                            onChange={e => updateStatement(qIndex, sIndex, { text: e.target.value })}
-                        />
+                    <div key={sIndex} className="flex items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                            <MathEditor
+                                value={s.text}
+                                onChange={v => updateStatement(qIndex, sIndex, { text: v })}
+                                placeholder={`Mệnh đề ${sIndex + 1}`}
+                                rows={1}
+                                variant="outlined"
+                                size="small"
+                                showPreview
+                            />
+                        </div>
                         <button
                             type="button"
                             onClick={() => updateStatement(qIndex, sIndex, { isTrue: !s.isTrue })}
-                            className={`shrink-0 px-3 py-2 rounded-lg font-bold text-sm transition-colors ${s.isTrue
+                            className={`shrink-0 mt-9 px-3 py-2 rounded-lg font-bold text-sm transition-colors ${s.isTrue
                                 ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
                                 : 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
                                 }`}
@@ -424,7 +351,7 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
                             type="button"
                             onClick={() => removeStatement(qIndex, sIndex)}
                             disabled={q.statements.length <= 1}
-                            className="shrink-0 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg disabled:opacity-30"
+                            className="shrink-0 mt-9 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg disabled:opacity-30"
                             title="Xóa mệnh đề"
                         >
                             <Icon name="delete" size={18} />
@@ -446,12 +373,14 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
         <div className="space-y-3">
             <div>
                 <label className={labelCls}>Đáp án đúng *</label>
-                <input
-                    type="text"
-                    className={inputCls}
-                    placeholder="VD: Hà Nội"
+                <MathEditor
                     value={q.correctAnswer}
-                    onChange={e => updateQuestion(qIndex, { correctAnswer: e.target.value })}
+                    onChange={v => updateQuestion(qIndex, { correctAnswer: v })}
+                    placeholder="VD: Hà Nội"
+                    rows={1}
+                    variant="outlined"
+                    size="small"
+                    showPreview
                 />
             </div>
             <div>
@@ -606,7 +535,11 @@ D. Đáp án 4
                     <h3 className="font-bold text-lg text-gray-900 dark:text-white">
                         📝 Danh sách câu hỏi ({questions.length})
                     </h3>
-                    <div className="relative">
+                    <div className="flex items-center gap-2">
+                        <Button size="sm" variant="secondary" icon="library_books" onClick={() => setShowPicker(true)}>
+                            Chọn từ kho
+                        </Button>
+                        <div className="relative">
                         <Button size="sm" icon="add" onClick={() => setShowTypePicker(v => !v)}>
                             Thêm câu hỏi
                         </Button>
@@ -624,12 +557,13 @@ D. Đáp án 4
                                 ))}
                             </div>
                         )}
+                        </div>
                     </div>
                 </div>
 
                 {questions.length === 0 ? (
                     <p className="text-gray-500 italic text-center py-6">
-                        Chưa có câu hỏi nào. Bấm "Thêm câu hỏi" hoặc dùng "Dán nhanh" ở trên.
+                        Chưa có câu hỏi nào. Bấm "Chọn từ kho", "Thêm câu hỏi" hoặc dùng "Dán nhanh" ở trên.
                     </p>
                 ) : (
                     <div className="space-y-4">
@@ -676,12 +610,14 @@ D. Đáp án 4
 
                                     <div className="mb-3">
                                         <label className={labelCls}>Nội dung câu hỏi *</label>
-                                        <textarea
-                                            rows={2}
-                                            className={inputCls}
-                                            placeholder="Nhập nội dung câu hỏi..."
+                                        <MathEditor
                                             value={q.questionText}
-                                            onChange={e => updateQuestion(qIndex, { questionText: e.target.value })}
+                                            onChange={v => updateQuestion(qIndex, { questionText: v })}
+                                            placeholder="Nhập nội dung câu hỏi..."
+                                            rows={2}
+                                            variant="outlined"
+                                            size="medium"
+                                            showPreview
                                         />
                                     </div>
 
@@ -704,6 +640,13 @@ D. Đáp án 4
                     {saving ? 'Đang lưu...' : (isEdit ? 'Cập nhật bài đấu' : 'Tạo bài đấu')}
                 </Button>
             </div>
+
+            {showPicker && (
+                <QuestionPickerModal
+                    onPick={handlePickFromBank}
+                    onClose={() => setShowPicker(false)}
+                />
+            )}
 
             {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
         </div>

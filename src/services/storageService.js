@@ -5,9 +5,10 @@ import { storage } from '../config/firebase';
  * Nén ảnh xuống dưới 200KB
  * @param {File} file - File ảnh gốc
  * @param {number} maxSizeKB - Kích thước tối đa (KB)
+ * @param {number} maxDimension - Cạnh dài tối đa sau resize (px)
  * @returns {Promise<Blob>} - Blob ảnh đã nén
  */
-const compressImage = async (file, maxSizeKB = 200) => {
+const compressImage = async (file, maxSizeKB = 200, maxDimension = 1200) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -19,8 +20,7 @@ const compressImage = async (file, maxSizeKB = 200) => {
         let width = img.width;
         let height = img.height;
 
-        // Resize nếu ảnh quá lớn (giữ tỷ lệ, max 1200px)
-        const maxDimension = 1200;
+        // Resize nếu ảnh quá lớn (giữ tỷ lệ)
         if (width > maxDimension || height > maxDimension) {
           if (width > height) {
             height = (height / width) * maxDimension;
@@ -155,6 +155,77 @@ export const deleteAvatar = async (avatarUrl) => {
   } catch (error) {
     console.error('Error deleting avatar:', error);
     // Không throw error vì việc xóa ảnh cũ không quan trọng bằng upload ảnh mới
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Kiểm tra + nén ảnh câu hỏi NGAY TẠI MÁY, chưa upload.
+ * Nén nhẹ hơn avatar (400KB, cạnh dài 1600px) để chữ/công thức còn đọc rõ.
+ * @param {File} file - File ảnh câu hỏi
+ * @returns {Promise<Object>} - { success, blob, previewUrl, size } hoặc { success: false, error }
+ */
+export const prepareQuestionImage = async (file) => {
+  try {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      throw new Error('Chỉ chấp nhận file ảnh (JPG, PNG, GIF, WebP)');
+    }
+
+    const maxOriginalSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxOriginalSize) {
+      throw new Error('Kích thước ảnh gốc không được vượt quá 10MB');
+    }
+
+    const blob = await compressImage(file, 400, 1600);
+    // previewUrl là blob: URL cục bộ, chưa hề chạm tới Storage
+    return { success: true, blob, previewUrl: URL.createObjectURL(blob), size: blob.size };
+  } catch (error) {
+    console.error('Error preparing question image:', error);
+    return { success: false, error: error.message || 'Xử lý ảnh thất bại' };
+  }
+};
+
+/**
+ * Đẩy blob ảnh đã nén lên Storage. Chỉ gọi khi người dùng thực sự lưu câu hỏi,
+ * để ảnh bỏ dở (đổi ảnh khác, tắt máy giữa chừng) không bao giờ tốn dung lượng.
+ * @param {Blob} blob - Blob ảnh đã nén từ prepareQuestionImage
+ * @returns {Promise<Object>} - { success, url, size } hoặc { success: false, error }
+ */
+export const uploadQuestionImage = async (blob) => {
+  try {
+    const timestamp = Date.now();
+    const fileName = `${timestamp}_question.jpg`;
+    const storageRef = ref(storage, `questionBank/${fileName}`);
+
+    const snapshot = await uploadBytes(storageRef, blob, {
+      contentType: 'image/jpeg',
+    });
+    const downloadURL = await getDownloadURL(snapshot.ref);
+
+    return { success: true, url: downloadURL, size: blob.size };
+  } catch (error) {
+    console.error('Error uploading question image:', error);
+    return { success: false, error: error.message || 'Upload ảnh thất bại' };
+  }
+};
+
+/**
+ * Xóa ảnh câu hỏi khỏi Storage
+ * @param {string} imageUrl - URL ảnh cần xóa
+ */
+export const deleteQuestionImage = async (imageUrl) => {
+  try {
+    if (!imageUrl || !imageUrl.includes('firebasestorage')) return { success: true };
+
+    const urlParts = imageUrl.split('/o/')[1];
+    if (!urlParts) return { success: true };
+
+    const filePath = decodeURIComponent(urlParts.split('?')[0]);
+    await deleteObject(ref(storage, filePath));
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting question image:', error);
     return { success: false, error: error.message };
   }
 };

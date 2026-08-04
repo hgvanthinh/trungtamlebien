@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { uploadExamFile, updateUploadExam } from '../../services/examBankService';
+import { useState, useEffect } from 'react';
+import { uploadExamFile, updateUploadExam, countGradedSubmissions } from '../../services/examBankService';
 import { processFileForExam, estimateProcessingTime } from '../../services/fileProcessingService';
 import Button from '../common/Button';
 import Icon from '../common/Icon';
@@ -13,6 +13,18 @@ const ExamUploadModal = ({ currentUser, onClose, onComplete, editingExam }) => {
   const [processProgress, setProcessProgress] = useState(null);
 
   const isEditMode = !!editingExam;
+
+  // Số HS đã nộp bài — chỉ dùng để cảnh báo khi GV đổi file đề
+  const [submittedCount, setSubmittedCount] = useState(0);
+
+  useEffect(() => {
+    if (!isEditMode) return;
+    let cancelled = false;
+    countGradedSubmissions(editingExam.id).then((result) => {
+      if (!cancelled && result.success) setSubmittedCount(result.count);
+    });
+    return () => { cancelled = true; };
+  }, [isEditMode, editingExam?.id]);
 
   const handleFileSelect = (e) => {
     const selectedFile = e.target.files[0];
@@ -174,6 +186,22 @@ const ExamUploadModal = ({ currentUser, onClose, onComplete, editingExam }) => {
           />
         ) : (
           <div className="space-y-4">
+            {/* Cảnh báo: đề đã có HS làm bài */}
+            {isEditMode && submittedCount > 0 && (
+              <div className="flex items-start gap-3 p-4 rounded-xl border border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20">
+                <Icon name="warning" className="text-red-600 dark:text-red-400 text-xl mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-bold text-red-700 dark:text-red-300">
+                    Đề này đã có {submittedCount} bài làm của học sinh
+                  </p>
+                  <p className="text-red-600 dark:text-red-400 mt-1">
+                    Thay file đề sẽ khiến bài đã nộp <strong>không còn khớp</strong> với đề mới.
+                    Điểm đã chấm vẫn giữ nguyên.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Title */}
             <div>
               <label className="block text-sm font-medium mb-2">

@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { createMixedExam, updateMixedExam } from '../../services/examBankService';
+import { useState, useMemo, useEffect } from 'react';
+import { createMixedExam, updateMixedExam, countGradedSubmissions } from '../../services/examBankService';
 import { processFileForExam, estimateProcessingTime } from '../../services/fileProcessingService';
 import { calculateDynamicPoints, validateQuestionCounts, formatPoints } from '../../utils/examScoring';
 import Button from '../common/Button';
@@ -53,6 +53,18 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete, editingExam }) => {
 
   const [processProgress, setProcessProgress] = useState(null);
   const [error, setError] = useState('');
+
+  // Số HS đã làm đề này — chỉ dùng để cảnh báo khi GV sửa đề
+  const [submittedCount, setSubmittedCount] = useState(0);
+
+  useEffect(() => {
+    if (!isEditing) return;
+    let cancelled = false;
+    countGradedSubmissions(editingExam.id).then((result) => {
+      if (!cancelled && result.success) setSubmittedCount(result.count);
+    });
+    return () => { cancelled = true; };
+  }, [isEditing, editingExam?.id]);
 
   const handleFileSelect = (e) => {
     const selectedFile = e.target.files[0];
@@ -315,6 +327,22 @@ const ExamMixedModal = ({ currentUser, onClose, onComplete, editingExam }) => {
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {/* Cảnh báo: đề đã có HS làm bài */}
+            {isEditing && submittedCount > 0 && (
+              <div className="flex items-start gap-3 p-4 rounded-xl border border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20">
+                <Icon name="warning" className="text-red-600 dark:text-red-400 text-xl mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-bold text-red-700 dark:text-red-300">
+                    Đề này đã có {submittedCount} bài làm của học sinh
+                  </p>
+                  <p className="text-red-600 dark:text-red-400 mt-1">
+                    Sửa đáp án, số câu hoặc thang điểm sẽ <strong>KHÔNG</strong> cập nhật lại
+                    điểm của những bài đã nộp. Điểm cũ vẫn được chấm theo đáp án cũ.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* File upload and title */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Title */}

@@ -14,6 +14,7 @@
     "browser-image-compression": "^2.0.2",
     "firebase": "^12.7.0",
     "html2pdf.js": "^0.13.0",
+    "katex": "^0.18.1",
     "mammoth": "^1.11.0",
     "mathlive": "^0.108.2",
     "pdf-lib": "^1.17.1",

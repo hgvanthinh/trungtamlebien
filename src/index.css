@@ -247,3 +247,22 @@
 .animate-glow-pulse {
   animation: glow-pulse 2s ease-in-out infinite;
 }
+/* ===== Công thức toán (thư viện math: MathText/MathEditor + KaTeX) ===== */
+
+/* Bỏ nền xanh mặc định của thư viện — không hợp tone Tailwind của dự án.
+   Dùng !important vì MathText set backgroundColor bằng inline style. */
+.math-formula-inline {
+  background-color: transparent !important;
+  padding: 0 !important;
+}
+
+/* KaTeX kế thừa màu chữ từ element cha để chạy đúng ở cả light/dark mode */
+.katex {
+  color: inherit;
+}
+
+/* Công thức dài (ma trận, phân số lồng) không làm vỡ layout mobile */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}

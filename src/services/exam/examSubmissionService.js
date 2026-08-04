@@ -390,6 +390,27 @@ export const getExamSubmissions = async (examId) => {
 };
 
 /**
+ * Đếm số bài HS đã nộp của 1 đề (bỏ qua bài đang làm dở).
+ * Dùng để cảnh báo GV khi sửa đề đã có người làm.
+ */
+export const countGradedSubmissions = async (examId) => {
+  if (!examId) return { success: true, count: 0 };
+
+  try {
+    const submissionsRef = collection(db, 'examSubmissions');
+    const q = query(submissionsRef, where('examId', '==', examId));
+    const snapshot = await getDocs(q);
+    const count = snapshot.docs.filter(
+      (doc) => doc.data().status !== 'in_progress'
+    ).length;
+    return { success: true, count };
+  } catch (error) {
+    console.error('Error counting submissions:', error);
+    return { success: false, error: error.message, count: 0 };
+  }
+};
+
+/**
  * Get all submissions (for admin grading page)
  */
 export const getAllSubmissions = async () => {
