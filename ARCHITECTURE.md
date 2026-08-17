@@ -68,6 +68,23 @@ tự tung RNG, nên client chỉ gửi *ý định* chứ không gửi *kết qu
 | `smashPiggy` | đập heo | **RNG mức vàng**, trừ `smashAttempts` |
 | `claimVersusReward` | thưởng thắng trận | xác minh người thắng từ `versusMatchResults`, chống nhận 2 lần |
 
+**Cơ chế "chống giàu"** (`getEffectiveCraftRate` / `getEffectiveSmashChance`) — tỉ lệ
+trúng giảm dần theo số Đồng Vàng HS **đang giữ**, tính ngay trong transaction sau khi
+đọc số dư thật:
+
+| Vàng đang giữ | Chế tạo (mức 1/2/3/4) | Đập heo (ra mức cao) |
+|---|---|---|
+| 0 | 95 / 75 / 50 / 25 % | 75% |
+| 10 | 50 / 30 / 20 / 10 % | 40% |
+| ≥30 (sàn) | 25 / 20 / 10 / 5 % | 15% |
+
+Nội suy tuyến tính giữa các mốc nên không có cú tụt đột ngột. Có **sàn** — HS giàu vẫn
+kiếm được vàng, chỉ chậm dần (chi phí mức 1 tăng từ ~211 xu lên ~800 xu mỗi vàng).
+
+⚠️ **Giao diện cố ý vẫn hiển thị tỉ lệ gốc 95/75/50/25** — `CRAFTING_LEVELS.successRate`
+bên client là con số *công bố*, không phải con số server dùng. Đây là chủ ý, đừng "sửa
+cho khớp". `craftLogs` lưu cả `baseRate`, `effectiveRate`, `goldBefore` để kiểm chứng.
+
 **Envelope response** — các function tiền trả về `{ ok, data }` hoặc `{ ok: false, error }`.
 Cờ trạng thái là `ok`, dữ liệu nghiệp vụ nằm **gọn trong `data`**, không trộn phẳng.
 Lý do: `craftGold` có field `success` mang nghĩa *thắng/thua* và trả `0` khi thua —

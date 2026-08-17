@@ -429,6 +429,59 @@ const CRAFTING_LEVELS = {
     4: { name: 'Liều Mạng', cost: 50, successRate: 25 },
 };
 
+// ===== "Chống giàu": tỉ lệ trúng giảm dần theo số Đồng Vàng đang giữ =====
+//
+// Giao diện vẫn hiển thị tỉ lệ gốc (95/75/50/25) — đây là tỉ lệ THỰC TẾ server
+// dùng để tung xúc xắc. Càng giàu càng khó kiếm thêm vàng, nhưng không bao giờ
+// chặn hẳn: HS vẫn tiến được, chỉ chậm dần.
+//
+// Mốc: <10 vàng giữ gốc → 10 vàng = MID → từ 30 vàng chạm sàn HIGH.
+// Nội suy tuyến tính giữa các mốc để không có cú tụt đột ngột tại đúng con số.
+const CRAFT_RATE_MID = { 1: 50, 2: 30, 3: 20, 4: 10 };
+const CRAFT_RATE_HIGH = { 1: 25, 2: 20, 3: 10, 4: 5 };
+
+const GOLD_SOFTCAP_START = 10;   // bắt đầu siết
+const GOLD_SOFTCAP_FLOOR = 30;   // chạm sàn, không giảm nữa
+
+const lerp = (a, b, t) => a + (b - a) * t;
+
+/**
+ * Tỉ lệ thành công thực tế khi chế tạo, theo số vàng đang giữ.
+ * @param {number} riskLevel 1-4
+ * @param {number} gold số Đồng Vàng hiện có
+ * @returns {number} phần trăm (0-100)
+ */
+const getEffectiveCraftRate = (riskLevel, gold) => {
+    const base = CRAFTING_LEVELS[riskLevel].successRate;
+    const mid = CRAFT_RATE_MID[riskLevel];
+    const high = CRAFT_RATE_HIGH[riskLevel];
+    const g = Math.max(0, Number(gold) || 0);
+
+    if (g <= 0) return base;
+    if (g < GOLD_SOFTCAP_START) return lerp(base, mid, g / GOLD_SOFTCAP_START);
+    if (g < GOLD_SOFTCAP_FLOOR) {
+        const span = GOLD_SOFTCAP_FLOOR - GOLD_SOFTCAP_START;
+        return lerp(mid, high, (g - GOLD_SOFTCAP_START) / span);
+    }
+    return high;
+};
+
+/**
+ * Xác suất đập heo trúng mức CAO, cũng giảm theo số vàng đang giữ.
+ * Đập heo luôn cho vàng (5 hoặc 10) nên đây là nguồn vàng lớn hơn cả chế tạo —
+ * không siết thì HS giàu vẫn tăng vàng đều.
+ */
+const getEffectiveSmashChance = (baseChance, gold) => {
+    const g = Math.max(0, Number(gold) || 0);
+    if (g <= 0) return baseChance;
+    if (g < GOLD_SOFTCAP_START) return lerp(baseChance, 0.40, g / GOLD_SOFTCAP_START);
+    if (g < GOLD_SOFTCAP_FLOOR) {
+        const span = GOLD_SOFTCAP_FLOOR - GOLD_SOFTCAP_START;
+        return lerp(0.40, 0.15, (g - GOLD_SOFTCAP_START) / span);
+    }
+    return 0.15;
+};
+
 const DEFAULT_TRANSFER_SETTINGS = { transferDailyLimit: 3, transferMaxAmount: 0 };
 
 const getTransferSettings = async () => {
@@ -523,12 +576,6 @@ exports.craftGold = moneyFunction(async ({ uid, body, db }) => {
     if (!Number.isInteger(quantity) || quantity <= 0) throw new Error('Số lượng không hợp lệ');
 
     const totalCost = config.cost * quantity;
-
-    // Tung xúc xắc phía server, sau khi đã xác thực — không ai can thiệp được
-    const roll = Math.random() * 100;
-    const isSuccess = roll < config.successRate;
-    const goldGained = isSuccess ? quantity : 0;
-
     const userRef = db.collection('users').doc(uid);
 
     const result = await db.runTransaction(async (t) => {
@@ -540,12 +587,21 @@ exports.craftGold = moneyFunction(async ({ uid, body, db }) => {
         const currentGold = Number(data.gold) || 0;
         if (currentCoins < totalCost) throw new Error('Không đủ xu để chế tạo');
 
+        // Tung xúc xắc BÊN TRONG transaction, sau khi đã đọc số vàng thật:
+        // tỉ lệ trúng phụ thuộc số vàng đang giữ nên phải chốt trên dữ liệu
+        // vừa đọc, tránh dùng số cũ khi có 2 request gần nhau.
+        const effectiveRate = getEffectiveCraftRate(riskLevel, currentGold);
+        const roll = Math.random() * 100;
+        const isSuccess = roll < effectiveRate;
+        const goldGained = isSuccess ? quantity : 0;
+
         const newCoins = currentCoins - totalCost;
         const newGold = currentGold + goldGained;
 
         t.update(userRef, { coins: newCoins, gold: newGold, updatedAt: nowStamp() });
 
-        // Ghi log để rà soát về sau (scripts/audit-economy.cjs đọc collection này)
+        // Ghi log để rà soát về sau (scripts/audit-economy.cjs đọc collection này).
+        // Lưu cả tỉ lệ thực tế đã dùng để sau này còn kiểm chứng được.
         t.set(db.collection('craftLogs').doc(), {
             uid,
             userName: data.fullName || data.username || '',
@@ -555,20 +611,25 @@ exports.craftGold = moneyFunction(async ({ uid, body, db }) => {
             totalCost,
             isSuccess,
             goldGained,
+            baseRate: config.successRate,
+            effectiveRate: Math.round(effectiveRate * 10) / 10,
+            goldBefore: currentGold,
             dateKey: getDateKeyVN(),
             createdAt: nowStamp(),
         });
 
-        return { newCoins, newGold, oldCoins: currentCoins, oldGold: currentGold };
+        return {
+            newCoins, newGold,
+            oldCoins: currentCoins, oldGold: currentGold,
+            isSuccess, goldGained,
+        };
     });
 
     return {
-        success: isSuccess ? 1 : 0,
-        failed: isSuccess ? 0 : 1,
+        success: result.isSuccess ? 1 : 0,
+        failed: result.isSuccess ? 0 : 1,
         quantity,
-        isSuccess,
         totalCost,
-        goldGained,
         riskLevel,
         levelName: config.name,
         ...result,
@@ -747,9 +808,6 @@ exports.smashPiggy = moneyFunction(async ({ uid, db }) => {
         ...(settingsSnap.exists ? settingsSnap.data() : {}),
     };
 
-    const isHigh = Math.random() < settings.smashHighChance;
-    const goldWon = isHigh ? settings.smashHighGold : settings.smashLowGold;
-
     const userRef = db.collection('users').doc(uid);
     const pigRef = db.collection('pigs').doc(uid);
 
@@ -763,7 +821,15 @@ exports.smashPiggy = moneyFunction(async ({ uid, db }) => {
         if (attempts < 1) throw new Error('Bạn không có lượt đập heo!');
         if (!pigDoc.exists) throw new Error('Bạn không có heo để đập!');
 
-        const newGold = (Number(data.gold) || 0) + goldWon;
+        // Tung xúc xắc trong transaction: cơ hội trúng mức cao giảm dần theo
+        // số vàng đang giữ. HS luôn nhận được vàng, chỉ là càng giàu càng hay
+        // rơi vào mức thấp.
+        const currentGold = Number(data.gold) || 0;
+        const effectiveChance = getEffectiveSmashChance(settings.smashHighChance, currentGold);
+        const isHigh = Math.random() < effectiveChance;
+        const goldWon = isHigh ? settings.smashHighGold : settings.smashLowGold;
+
+        const newGold = currentGold + goldWon;
         t.update(userRef, {
             gold: newGold,
             smashAttempts: attempts - 1,
@@ -775,7 +841,12 @@ exports.smashPiggy = moneyFunction(async ({ uid, db }) => {
             uid,
             userName: data.fullName || data.username || '',
             type: 'smash',
-            detail: { isHigh, goldWon, pigLevel: pigDoc.data().level || 1 },
+            detail: {
+                isHigh, goldWon,
+                pigLevel: pigDoc.data().level || 1,
+                goldBefore: currentGold,
+                effectiveChance: Math.round(effectiveChance * 1000) / 1000,
+            },
             dateKey: getDateKeyVN(),
             weekId: getWeekIdVN(),
             createdAt: nowStamp(),

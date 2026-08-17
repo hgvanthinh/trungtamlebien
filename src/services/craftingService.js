@@ -8,6 +8,11 @@ import { callMoneyFunction } from './moneyApi';
  * LƯU Ý: bảng này chỉ dùng để HIỂN THỊ và kiểm tra sơ bộ trên giao diện.
  * Bản gốc dùng để tính tiền nằm trong functions/index.js — sửa ở đây phải
  * sửa cả bên đó, nếu không server sẽ tính theo giá của nó.
+ *
+ * `successRate` ở đây là tỉ lệ CÔNG BỐ. Tỉ lệ server thực sự dùng để tung
+ * xúc xắc giảm dần theo số Đồng Vàng học sinh đang giữ (cơ chế "chống giàu",
+ * xem getEffectiveCraftRate trong functions/index.js). Đây là chủ ý — giao
+ * diện giữ nguyên con số gốc, không hiển thị phần bị siết.
  */
 const CRAFTING_LEVELS = {
   1: {
