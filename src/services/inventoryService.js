@@ -1,6 +1,5 @@
 import {
     collection,
-    addDoc,
     getDocs,
     doc,
     getDoc,
@@ -9,86 +8,43 @@ import {
     query,
     where,
     orderBy,
-    Timestamp,
-    runTransaction
+    Timestamp
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { callMoneyFunction } from './moneyApi';
 
 /**
  * Purchase an item and add to inventory
- * @param {string} userId - User ID
+ *
+ * Server tự đọc GIÁ và LOẠI TIỀN từ storeItems rồi mới trừ — client không gửi
+ * giá lên nữa, nên không thể tự khai giá 0. itemData chỉ còn dùng để dựng lại
+ * object hiển thị ngay sau khi mua, không ảnh hưởng tới số tiền bị trừ.
+ *
+ * @param {string} _userId - giữ cho tương thích, server lấy uid từ token
  * @param {string} itemId - Item ID
- * @param {Object} itemData - Item data (name, price, currency, imageUrl)
+ * @param {Object} itemData - Item data (chỉ dùng cho hiển thị)
  * @returns {Promise<Object>} - Purchase result
  */
-export const purchaseItem = async (userId, itemId, itemData) => {
-    try {
-        return await runTransaction(db, async (transaction) => {
-            // Get user document
-            const userRef = doc(db, 'users', userId);
-            const userDoc = await transaction.get(userRef);
+export const purchaseItem = async (_userId, itemId, itemData = {}) => {
+    const data = await callMoneyFunction('purchaseItem', { itemId });
 
-            if (!userDoc.exists()) {
-                throw new Error('User not found');
-            }
-
-            const userData = userDoc.data();
-            const currentCoins = userData.coins || 0;
-            const currentGold = userData.gold || 0;
-
-            // Check if user has enough currency
-            if (itemData.currency === 'coins') {
-                if (currentCoins < itemData.price) {
-                    throw new Error('Không đủ Xu để mua món hàng này');
-                }
-            } else if (itemData.currency === 'gold') {
-                if (currentGold < itemData.price) {
-                    throw new Error('Không đủ Đồng Vàng để mua món hàng này');
-                }
-            }
-
-            // Deduct currency
-            const updates = {};
-            if (itemData.currency === 'coins') {
-                updates.coins = currentCoins - itemData.price;
-            } else {
-                updates.gold = currentGold - itemData.price;
-            }
-
-            transaction.update(userRef, updates);
-
-            // Add to inventory
-            const inventoryRef = collection(db, 'inventories');
-            const inventoryData = {
-                userId,
-                itemId,
-                itemName: itemData.name,
-                itemDescription: itemData.description || '',
-                itemCategory: itemData.category || '',
-                itemImageUrl: itemData.imageUrl || '',
-                purchasePrice: itemData.price,
-                purchaseCurrency: itemData.currency,
-                purchasedAt: Timestamp.now()
-            };
-
-            // Use addDoc outside transaction (will be committed with transaction)
-            const newInventoryRef = doc(inventoryRef);
-            transaction.set(newInventoryRef, inventoryData);
-
-            return {
-                success: true,
-                newCoins: itemData.currency === 'coins' ? updates.coins : currentCoins,
-                newGold: itemData.currency === 'gold' ? updates.gold : currentGold,
-                inventoryItem: {
-                    id: newInventoryRef.id,
-                    ...inventoryData
-                }
-            };
-        });
-    } catch (error) {
-        console.error('Error purchasing item:', error);
-        throw error;
-    }
+    return {
+        success: true,
+        newCoins: data.newCoins,
+        newGold: data.newGold,
+        inventoryItem: {
+            id: data.inventoryItemId,
+            userId: _userId,
+            itemId,
+            itemName: itemData.name || '',
+            itemDescription: itemData.description || '',
+            itemCategory: itemData.category || '',
+            itemImageUrl: itemData.imageUrl || '',
+            purchasePrice: itemData.price,
+            purchaseCurrency: itemData.currency,
+            purchasedAt: Timestamp.now()
+        }
+    };
 };
 
 /**

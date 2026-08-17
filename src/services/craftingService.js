@@ -1,10 +1,13 @@
-import { db } from '../config/firebase';
-import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { callMoneyFunction } from './moneyApi';
 
 /**
  * Crafting Configuration - Risk/Reward System
  * Mỗi level có cost và success rate khác nhau
  * Reward: 1 Gold Coin per successful craft
+ *
+ * LƯU Ý: bảng này chỉ dùng để HIỂN THỊ và kiểm tra sơ bộ trên giao diện.
+ * Bản gốc dùng để tính tiền nằm trong functions/index.js — sửa ở đây phải
+ * sửa cả bên đó, nếu không server sẽ tính theo giá của nó.
  */
 const CRAFTING_LEVELS = {
   1: {
@@ -91,108 +94,37 @@ export const calculateMaxQuantity = (userCoins, riskLevel) => {
 
 /**
  * Perform crafting operation (Main function)
- * Uses client-side RNG for randomness + Firestore Transaction for data integrity
  *
- * @param {string} userId - User ID
+ * RNG và việc trừ Xu / cộng Vàng đều chạy TRÊN SERVER. Client chỉ gửi mức rủi
+ * ro và số lượng muốn cược, rồi nhận kết quả về — không tự quyết thắng/thua,
+ * cũng không tự ghi số dư (Firestore rules đã chặn).
+ *
+ * @param {string} _userId - giữ cho tương thích, server lấy uid từ token
  * @param {number} riskLevel - Risk level (1-4)
  * @param {number} quantity - Number of crafts
  * @returns {Promise<Object>} Result object with success/failed counts and new balances
  */
-export const craftGold = async (userId, riskLevel, quantity) => {
-  // Step 1: Get configuration
+export const craftGold = async (_userId, riskLevel, quantity) => {
   const config = CRAFTING_LEVELS[riskLevel];
+  if (!config) throw new Error('Invalid risk level');
+  if (quantity <= 0) throw new Error('Quantity must be greater than 0');
 
-  if (!config) {
-    throw new Error('Invalid risk level');
-  }
+  const data = await callMoneyFunction('craftGold', { riskLevel, quantity });
 
-  if (quantity <= 0) {
-    throw new Error('Quantity must be greater than 0');
-  }
-
-  // Step 2: Calculate total cost
-  const totalCost = config.cost * quantity;
-
-  // Step 3: Client-side RNG - Single roll for entire batch (all-or-nothing)
-  // Chỉ tung 1 lần duy nhất cho toàn bộ số lượng:
-  // Thắng → nhận TOÀN BỘ quantity đồng vàng
-  // Thua  → mất TOÀN BỘ xu, nhận 0 đồng vàng
-  const random = Math.random() * 100; // 0–100
-  const isSuccess = random < config.successRate;
-  const successCount = isSuccess ? quantity : 0;
-
-  const results = [{
-    attempt: 1,
-    random: random.toFixed(2),
-    success: isSuccess,
-    quantity
-  }];
-
-  // Step 4: Firestore Transaction (Atomic update)
-  const userRef = doc(db, 'users', userId);
-
-  try {
-    const result = await runTransaction(db, async (transaction) => {
-      // Read current user document
-      const userDoc = await transaction.get(userRef);
-
-      if (!userDoc.exists()) {
-        throw new Error('User not found');
-      }
-
-      const userData = userDoc.data();
-      const currentCoins = userData.coins || 0;
-      const currentGold = userData.gold || 0;
-
-      // Re-validate (Protection against race conditions)
-      if (currentCoins < totalCost) {
-        throw new Error('Insufficient coins');
-      }
-
-      // Calculate new balances
-      const newCoins = currentCoins - totalCost;
-      const newGold = currentGold + successCount;
-
-      // Update document atomically
-      transaction.update(userRef, {
-        coins: newCoins,
-        gold: newGold,
-        updatedAt: serverTimestamp()
-      });
-
-      // Return result for UI display
-      return {
-        success: isSuccess ? 1 : 0,   // 1 nếu thắng, 0 nếu thua
-        failed: isSuccess ? 0 : 1,    // 0 nếu thắng, 1 nếu thua
-        quantity,                      // Số lượng đồng vàng cược
-        isSuccess,                     // Kết quả thắng/thua
-        totalCost,
-        goldGained: successCount,      // = quantity nếu thắng, = 0 nếu thua
-        newCoins,
-        newGold,
-        oldCoins: currentCoins,
-        oldGold: currentGold,
-        riskLevel,
-        levelName: config.name,
-        results // Optional: for debugging
-      };
-    });
-
-    console.log('✅ Crafting successful:', result);
-    return result;
-
-  } catch (error) {
-    console.error('❌ Crafting failed:', error);
-
-    // User-friendly error messages
-    if (error.message === 'Insufficient coins') {
-      throw new Error('Không đủ xu để chế tạo');
-    } else if (error.message === 'User not found') {
-      throw new Error('Không tìm thấy thông tin người dùng');
-    } else {
-      throw new Error('Lỗi khi chế tạo. Vui lòng thử lại sau.');
-    }
-  }
+  return {
+    success: data.success,
+    failed: data.failed,
+    quantity: data.quantity,
+    isSuccess: data.isSuccess,
+    totalCost: data.totalCost,
+    goldGained: data.goldGained,
+    newCoins: data.newCoins,
+    newGold: data.newGold,
+    oldCoins: data.oldCoins,
+    oldGold: data.oldGold,
+    riskLevel: data.riskLevel,
+    levelName: data.levelName,
+  };
 };
 
 /**

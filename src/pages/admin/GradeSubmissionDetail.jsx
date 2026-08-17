@@ -5,7 +5,6 @@ import { db } from '../../config/firebase';
 import { getExamById } from '../../services/examBankService';
 import { getAssignmentById } from '../../services/assignmentService';
 import { awardExamXp } from '../../services/pigService';
-import { getPigGameSettings } from '../../services/gameSettingsService';
 import Icon from '../../components/common/Icon';
 import Toast from '../../components/common/Toast';
 import PDFAnnotator from '../../components/exam/PDFAnnotator';
@@ -94,15 +93,12 @@ const GradeSubmissionDetail = () => {
         if (submission?.assignmentId) {
           const assignment = await getAssignmentById(submission.assignmentId);
           if (assignment?.isPigTeaching && submission.submittedAt) {
-            const settings = await getPigGameSettings();
+            // Điểm vừa lưu ở trên; server tự đọc lại từ submission và tự
+            // check khung giờ theo submittedAt (giờ server).
             const result = await awardExamXp(
               submission.studentUid,
               submission.studentName || '',
-              submissionId,
-              { totalScore: parseFloat(score), maxScore: submission.maxScore || 10 },
-              assignment,
-              settings,
-              submission.submittedAt.toDate()
+              submissionId
             );
             if (result.awarded) {
               setToast({ type: 'success', message: `🐷 Heo của ${submission.studentName} +${result.xpGained} XP!` });

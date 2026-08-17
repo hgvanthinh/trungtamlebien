@@ -6,7 +6,6 @@ import {
     listenToPlayerQuestion,
     submitAnswer,
     claimFirestoreSubmission,
-    claimReward,
     scheduleSessionCleanup,
     updatePlayerStatus,
     registerDisconnect,
@@ -18,6 +17,7 @@ import {
 import { getVersusGame } from '../../services/versusGameService';
 import { getVersusItems, consumeVersusItem, VERSUS_ITEM_EFFECTS } from '../../services/versusItemService';
 import { getVersusSettings } from '../../services/versusSettingsService';
+import { claimVersusReward } from '../../services/versusRewardService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useConfirm } from '../../hooks/useConfirm';
 import Icon from '../common/Icon';
@@ -286,26 +286,6 @@ export default function VersusMatch({ sessionId, gameId, onExit }) {
             opponentName: oppPlayer?.name || 'Đối thủ',
         });
 
-        // THƯỞNG XU: chỉ winner, kể cả thắng do surrender/disconnect, TRỪ forceStopped.
-        // claimReward = transaction trên cờ rewardClaimed → chống cộng 2 lần khi reload.
-        if (won && playerId) {
-            try {
-                const canReward = await claimReward(sessionId);
-                if (canReward) {
-                    const settings = await getVersusSettings();
-                    const winCoins = settings.winCoins || 0;
-                    if (winCoins > 0) {
-                        await updateDoc(doc(db, 'users', playerId), { coins: increment(winCoins) });
-                        // Refresh local profile (AuthContext.updateUserProfile chỉ update state, không ghi Firestore)
-                        updateUserProfile({ coins: (userProfileRef.current?.coins || 0) + winCoins });
-                        setRewardCoins(winCoins);
-                    }
-                }
-            } catch (e) {
-                console.error('[VersusMatch] Reward error:', e);
-            }
-        }
-
         // Bước 2: chờ rounds đối thủ có trên RTDB rồi mới claim+submit
         // (tránh race: winner claim trước khi loser kịp save)
         let oppRounds = [];
@@ -361,6 +341,22 @@ export default function VersusMatch({ sessionId, gameId, onExit }) {
 
             // Cleanup RTDB sau 5 phút
             scheduleSessionCleanup(sessionId);
+        }
+
+        // THƯỞNG XU: gọi SAU khi kết quả trận đã nằm trên Firestore, vì server
+        // đọc chính versusMatchResults để tự xác minh ai là người thắng —
+        // client không tự khai thắng để nhận xu được nữa.
+        // Server cũng chốt mỗi sessionId chỉ trả thưởng đúng một lần.
+        if (won && playerId) {
+            try {
+                const reward = await claimVersusReward(sessionId);
+                if (reward.awarded) {
+                    updateUserProfile({ coins: reward.newCoins });
+                    setRewardCoins(reward.coins);
+                }
+            } catch (e) {
+                console.error('[VersusMatch] Reward error:', e);
+            }
         }
     }, [playerKey, sessionId, gameId, playerId, updateUserProfile]);
 

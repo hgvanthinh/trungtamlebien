@@ -1,16 +1,14 @@
 import { db } from '../config/firebase';
 import {
     collection,
-    doc,
     getDocs,
     query,
     where,
     orderBy,
-    limit,
-    runTransaction,
-    serverTimestamp
+    limit
 } from 'firebase/firestore';
 import { getDateKeyVN } from './gameSettingsService';
+import { callMoneyFunction } from './moneyApi';
 
 /**
  * Tài khoản được coi là "đã duyệt" nếu admin duyệt tường minh (approved === true),
@@ -25,82 +23,19 @@ export const isAccountApproved = (userData) => {
 
 /**
  * Chuyển Xu/Đồng Vàng giữa 2 học sinh.
- * - Giới hạn số lần/ngày (settings.transferDailyLimit), đếm trên users.transferStats của người gửi
- * - Atomic: trừ người gửi + cộng người nhận + ghi log trong 1 transaction
- * - Cả người gửi và người nhận đều phải được admin duyệt (xem /admin/students)
+ *
+ * Toàn bộ việc kiểm tra (duyệt tài khoản, giới hạn lượt/ngày, số dư) và cả
+ * việc trừ/cộng tiền đều chạy TRÊN SERVER — client chỉ gửi ý định chuyển.
+ * Các tham số fromUid/fromName/toName/settings giữ lại cho tương thích với
+ * chỗ gọi cũ nhưng server không tin chúng: người gửi lấy từ token đăng nhập.
  */
-export const transferCurrency = async ({ fromUid, fromName, toUid, toName, currency, amount, settings }) => {
-    if (!Number.isInteger(amount) || amount <= 0) throw new Error('Số lượng phải là số nguyên dương');
-    if (fromUid === toUid) throw new Error('Không thể tự chuyển cho chính mình');
-    if (currency !== 'coins' && currency !== 'gold') throw new Error('Loại tiền không hợp lệ');
-    if (settings.transferMaxAmount > 0 && amount > settings.transferMaxAmount) {
-        throw new Error(`Mỗi lần chuyển tối đa ${settings.transferMaxAmount}`);
-    }
-
-    const fromRef = doc(db, 'users', fromUid);
-    const toRef = doc(db, 'users', toUid);
-
-    return await runTransaction(db, async (transaction) => {
-        const fromDoc = await transaction.get(fromRef);
-        const toDoc = await transaction.get(toRef);
-
-        if (!fromDoc.exists()) throw new Error('Không tìm thấy tài khoản của bạn');
-        if (!toDoc.exists()) throw new Error('Không tìm thấy người nhận');
-
-        const fromData = fromDoc.data();
-        if (!isAccountApproved(fromData)) {
-            throw new Error('Tài khoản của bạn chưa được admin duyệt, không thể chuyển khoản');
-        }
-        if (!isAccountApproved(toDoc.data())) {
-            throw new Error('Tài khoản người nhận chưa được admin duyệt');
-        }
-
-        const dateKey = getDateKeyVN();
-
-        // Giới hạn lượt chuyển trong ngày
-        const stats = fromData.transferStats?.dateKey === dateKey
-            ? fromData.transferStats
-            : { dateKey, count: 0 };
-        if (stats.count >= settings.transferDailyLimit) {
-            throw new Error(`Bạn đã hết lượt chuyển hôm nay (tối đa ${settings.transferDailyLimit} lần/ngày)`);
-        }
-
-        // Kiểm tra số dư
-        const balance = fromData[currency] || 0;
-        if (balance < amount) {
-            throw new Error(`Không đủ ${currency === 'coins' ? 'Xu' : 'Đồng Vàng'} để chuyển`);
-        }
-
-        // Trừ người gửi + đếm lượt
-        transaction.update(fromRef, {
-            [currency]: balance - amount,
-            transferStats: { dateKey, count: stats.count + 1 },
-            updatedAt: serverTimestamp()
-        });
-
-        // Cộng người nhận — CHỈ ghi đúng field currency (rules chỉ cho phép tăng coins/gold)
-        transaction.update(toRef, {
-            [currency]: (toDoc.data()[currency] || 0) + amount
-        });
-
-        // Log giao dịch (append-only)
-        const logRef = doc(collection(db, 'transfers'));
-        transaction.set(logRef, {
-            fromUid,
-            fromName: fromName || '',
-            toUid,
-            toName: toName || '',
-            currency,
-            amount,
-            dateKey,
-            createdAt: serverTimestamp()
-        });
-
-        return {
-            newBalance: balance - amount,
-            transfersLeft: settings.transferDailyLimit - stats.count - 1
-        };
+export const transferCurrency = async ({ toUid, currency, amount }) => {
+    const { newBalance, transfersLeft } = await callMoneyFunction('transferCurrency', {
+        toUid,
+        currency,
+        amount,
     });
+    return { newBalance, transfersLeft };
 };
 
 /**

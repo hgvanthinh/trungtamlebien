@@ -17,13 +17,6 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
-    // Helper function: Tài khoản đã được admin duyệt chưa
-    // - approved == true: đã duyệt tường minh
-    // - approved không tồn tại (tài khoản cũ) nhưng đã có lớp: coi như đã duyệt sẵn
-    function isAccountApproved(userData) {
-      return userData.get('approved', userData.get('classes', []).size() > 0) == true;
-    }
-
     // Collection: users
     match /users/{userId} {
       // Admin có thể đọc/ghi tất cả user documents
@@ -46,18 +39,17 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['username', 'fullName', 'email', 'role', 'classes', 'approved']);
 
       // User có thể cập nhật một số field của chính mình (avatar, stats)
-      // Nhưng KHÔNG được thay đổi role, classes, email
-      // và KHÔNG được tự tăng lượt đập heo (smashAttempts chỉ do admin chốt tuần cấp)
+      // KHÔNG được đụng vào: role/email/classes/approved (định danh & phân quyền),
+      // coins/gold (tiền — chỉ Cloud Function với Admin SDK mới được ghi),
+      // smashAttempts (lượt đập heo — chỉ admin chốt tuần mới cấp).
+      //
+      // LƯU Ý BẢO MẬT: mọi thay đổi số dư PHẢI đi qua Cloud Function.
+      // Không được thêm bất kỳ rule nào cho phép client ghi coins/gold —
+      // kể cả rule "chỉ cho tăng", vì client tự chọn được giá trị tăng
+      // và có thể tự đặt số dư tuỳ ý cho chính mình.
       allow update: if isOwner(userId)
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'email', 'classes', 'approved'])
-        && request.resource.data.get('smashAttempts', 0) <= resource.data.get('smashAttempts', 0);
-
-      // Cho phép nhận chuyển khoản xu/vàng từ HS khác: chỉ được TĂNG coins/gold,
-      // không được sửa bất kỳ field nào khác của người nhận
-      allow update: if isAuthenticated()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['coins', 'gold'])
-        && request.resource.data.get('coins', 0) >= resource.data.get('coins', 0)
-        && request.resource.data.get('gold', 0) >= resource.data.get('gold', 0);
+        && !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['role', 'email', 'classes', 'approved', 'coins', 'gold', 'smashAttempts']);
     }
 
     // Cho phép admin query toàn bộ collection users (cần cho hybrid model và admin operations)
@@ -216,9 +208,10 @@ service cloud.firestore {
       // Admin có toàn quyền
       allow read, write: if isAdmin();
 
-      // Học sinh đọc/xóa đồ của chính mình, tạo khi mua hàng
+      // Học sinh đọc/xóa đồ của chính mình.
+      // KHÔNG cho tự tạo: việc mua hàng do Cloud Function purchaseItem xử lý,
+      // nếu cho client create thì HS tự thêm đồ vào kho mà không mất tiền.
       allow read, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
     }
 
     // ===== Game Nuôi Heo Đất =====
@@ -228,18 +221,19 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
 
-      // HS tạo heo của chính mình, bắt đầu từ cấp 1 / 0 XP
-      allow create: if isOwner(userId)
-        && request.resource.data.level == 1
-        && request.resource.data.xp == 0;
-
-      // HS cập nhật heo của mình: XP chỉ được tăng, tối đa +10 mỗi lần ghi
+      // KHÔNG cho HS tự tạo/xoá heo hay tự sửa XP:
+      // - tạo heo  → Cloud Function pigPurchase (phải trả Đồng Vàng)
+      // - cho ăn   → Cloud Function feedPig (cộng XP theo giờ server)
+      // - nộp bài  → awardExamXp
+      // - đập heo  → Cloud Function smashPiggy (xoá heo + trả vàng)
+      //
+      // Trước đây HS tự ghi được XP (+10 mỗi lần) nên có thể bơm cấp heo để
+      // lọt top khối, và top khối được cấp lượt đập heo — tức là một đường
+      // vòng để tạo ra Đồng Vàng.
+      //
+      // Chỉ còn cho phép đồng bộ lại khối lớp (grade) khi HS được xếp lớp mới.
       allow update: if isOwner(userId)
-        && request.resource.data.xp >= resource.data.xp
-        && request.resource.data.xp - resource.data.xp <= 10;
-
-      // Đập heo: heo vỡ (lượt đập đã được chặn ở users.smashAttempts)
-      allow delete: if isOwner(userId);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['grade']);
     }
 
     // Collection: pigGameLogs (nhật ký game heo, append-only)
@@ -250,18 +244,14 @@ service cloud.firestore {
         || (isAuthenticated() && request.resource.data.uid == request.auth.uid);
     }
 
-    // Collection: transfers (chuyển xu/vàng giữa HS, append-only)
+    // Collection: transfers (nhật ký chuyển xu/vàng giữa HS, append-only)
+    // Việc chuyển khoản do Cloud Function transferCurrency thực hiện, và
+    // chính nó ghi log này — client chỉ được ĐỌC giao dịch liên quan tới mình.
     match /transfers/{transferId} {
       allow read: if isAdmin();
       allow read: if isAuthenticated()
         && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
-      allow create: if isAuthenticated()
-        && request.resource.data.fromUid == request.auth.uid
-        && request.resource.data.amount is int
-        && request.resource.data.amount > 0
-        && isAccountApproved(get(/databases/$(database)/documents/users/$(request.resource.data.fromUid)).data)
-        && isAccountApproved(get(/databases/$(database)/documents/users/$(request.resource.data.toUid)).data);
-      allow update, delete: if false;
+      allow write: if false;
     }
 
     // Collection: pigWeeklyResults (kết quả chốt tuần, docId = weekId)
@@ -286,6 +276,21 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
       allow update, delete: if isAdmin();
+    }
+
+    // Collection: versusRewardClaims (chốt mỗi trận chỉ nhận thưởng 1 lần)
+    // Chỉ Cloud Function (Admin SDK) ghi được — client không đụng vào.
+    match /versusRewardClaims/{sessionId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Collection: craftLogs (nhật ký chế tạo vàng, phục vụ rà soát kinh tế)
+    // Chỉ Cloud Function ghi; HS xem được log của chính mình.
+    match /craftLogs/{logId} {
+      allow read: if isAdmin();
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow write: if false;
     }
 
     // Collection: questionBank (kho câu hỏi dùng lại, chỉ admin quản lý)

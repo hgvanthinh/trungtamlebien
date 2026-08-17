@@ -66,7 +66,7 @@ export default function PigPet() {
     const handleBuyPig = async () => {
         try {
             setBusy(true);
-            const result = await buyPig(uid, userName, grade, settings);
+            const result = await buyPig();
             updateUserProfile({ gold: result.newGold, pigLevel: 1 });
             setToast({ type: 'success', message: '🐷 Chúc mừng! Bạn đã có heo đất. Hãy cho heo ăn để lên cấp nhé!' });
             await load();
@@ -105,10 +105,11 @@ export default function PigPet() {
         }
     };
 
-    const handleBuyFood = async (quantity, item) => {
+    // Đơn giá thức ăn do server tự tra từ storeItems nên không nhận item nữa
+    const handleBuyFood = async (quantity) => {
         try {
             setBusy(true);
-            const result = await buyFood(uid, userName, quantity, item.price);
+            const result = await buyFood(uid, userName, quantity);
             updateUserProfile({ coins: result.newCoins });
             setPig(prev => ({ ...prev, food: result.newFood }));
             setToast({ type: 'success', message: `🌽 Đã mua ${quantity} thức ăn cho heo!` });
@@ -122,7 +123,7 @@ export default function PigPet() {
     const handleSmash = async () => {
         try {
             setBusy(true);
-            const result = await smashPiggy(uid, userName, settings);
+            const result = await smashPiggy();
             updateUserProfile({ gold: result.newGold, smashAttempts: result.attemptsLeft, pigLevel: 0 });
             setPig(null);
             setSmashResult(result);

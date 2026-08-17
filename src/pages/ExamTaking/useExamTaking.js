@@ -13,7 +13,6 @@ import {
 } from '../../services/examBankService';
 import { getAssignmentById } from '../../services/assignmentService';
 import { awardExamXp } from '../../services/pigService';
-import { getPigGameSettings } from '../../services/gameSettingsService';
 
 export const useExamTaking = (examId, assignmentId, currentUser, userProfile, navigate) => {
   const [exam, setExam] = useState(null);
@@ -42,18 +41,16 @@ export const useExamTaking = (examId, assignmentId, currentUser, userProfile, na
 
   // Cộng XP cho heo nếu là đề "Dạy heo học" nộp trong khung giờ.
   // Fire-and-safe: lỗi không được chặn luồng nộp bài.
-  const tryAwardPigXp = async (subId, totalScore, maxScore) => {
+  // Điểm không cần truyền: server đọc thẳng từ examSubmissions
+  const tryAwardPigXp = async (subId) => {
     try {
       const assignment = assignmentRef.current;
       if (!assignment?.isPigTeaching || !subId) return '';
-      const settings = await getPigGameSettings();
+      // Server tự đọc điểm + thời điểm nộp từ submission rồi mới cộng XP
       const result = await awardExamXp(
         currentUser.uid,
         userProfile?.fullName || '',
-        subId,
-        { totalScore, maxScore },
-        assignment,
-        settings
+        subId
       );
       if (result.awarded) {
         return result.leveledUp
@@ -197,7 +194,7 @@ export const useExamTaking = (examId, assignmentId, currentUser, userProfile, na
     const result = await submitExam(submissionId, duration);
 
     if (result.success) {
-      const pigMsg = await tryAwardPigXp(submissionId, result.autoGradedScore, result.maxScore);
+      const pigMsg = await tryAwardPigXp(submissionId);
       setToast({
         message: `Đã nộp bài! Điểm: ${result.autoGradedScore}/${result.maxScore}${pigMsg}`,
         type: 'success'
@@ -287,7 +284,7 @@ export const useExamTaking = (examId, assignmentId, currentUser, userProfile, na
     );
 
     if (result.success) {
-      const pigMsg = await tryAwardPigXp(result.submissionId, result.score, result.maxScore);
+      const pigMsg = await tryAwardPigXp(result.submissionId);
       setToast({
         message: `Nộp bài thành công! Điểm: ${result.correctCount}/${result.totalQuestions} câu đúng${pigMsg}`,
         type: 'success'
@@ -344,7 +341,7 @@ export const useExamTaking = (examId, assignmentId, currentUser, userProfile, na
     });
 
     if (result.success) {
-      const pigMsg = await tryAwardPigXp(result.submissionId, result.totalScore, result.maxScore);
+      const pigMsg = await tryAwardPigXp(result.submissionId);
       setToast({ type: 'success', message: `Nộp bài thành công!${pigMsg}` });
       setTimeout(() => {
         navigate(`/exam-result/${result.submissionId}`);
