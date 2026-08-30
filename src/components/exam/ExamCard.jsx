@@ -39,13 +39,24 @@ const ExamCard = ({
   onDelete,
   onAssign,
   onEdit,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
 }) => {
   const typeConfig = getExamTypeConfig(exam.type);
 
   return (
-    <div className="clay-card p-4 hover:shadow-xl transition-all flex flex-col h-full">
+    <div className={`clay-card p-4 hover:shadow-xl transition-all flex flex-col h-full ${selectable && selected ? 'ring-2 ring-primary' : ''}`}>
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect?.(exam.id)}
+            className="mt-2 w-5 h-5 accent-green-600 cursor-pointer flex-shrink-0"
+          />
+        )}
         {/* Type Icon */}
         <div className={`p-2 rounded-lg flex-shrink-0 ${typeConfig.bgColor}`}>
           <Icon

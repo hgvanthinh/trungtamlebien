@@ -306,7 +306,7 @@ const GradeSubmissions = () => {
               {exam?.title}
             </h1>
             <p className="text-[#608a67] dark:text-[#8ba890]">
-              Lớp: {cls?.name} • Hạn: {selectedAssignment.deadline?.toDate().toLocaleDateString('vi-VN')}
+              Lớp: {cls?.displayName || cls?.name} • Hạn: {selectedAssignment.deadline?.toDate().toLocaleDateString('vi-VN')}
             </p>
           </div>
           {submissions.length > 0 && (
@@ -464,7 +464,7 @@ const GradeSubmissions = () => {
                                 submissionsList: uploadSubmissions.map(s => s.id),
                                 currentIndex,
                                 assignmentId: selectedAssignment.id,
-                                className: cls?.name,
+                                className: cls?.displayName || cls?.name,
                                 examTitle: exam?.title,
                               }
                             });
@@ -561,7 +561,7 @@ const GradeSubmissions = () => {
                     <div className="flex flex-wrap gap-3 text-sm mb-3">
                       <span className="flex items-center gap-1 text-[#608a67] dark:text-[#8ba890]">
                         <Icon name="groups" className="text-sm" />
-                        {cls?.name}
+                        {cls?.displayName || cls?.name}
                       </span>
                       <span className={`flex items-center gap-1 ${isExpired
                         ? 'text-red-600 dark:text-red-400'

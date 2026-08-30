@@ -40,6 +40,12 @@ const ExamBank = () => {
   const [assignmentToDelete, setAssignmentToDelete] = useState(null);
   const [activeTab, setActiveTab] = useState('exams'); // 'exams' | 'assignments' | 'questions'
   const [toast, setToast] = useState(null);
+  // Chọn nhiều để xóa hàng loạt
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedExamIds, setSelectedExamIds] = useState(new Set());
+  const [selectedAssignmentIds, setSelectedAssignmentIds] = useState(new Set());
+  const [showConfirmBulkDelete, setShowConfirmBulkDelete] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -68,6 +74,76 @@ const ExamBank = () => {
     }
   };
 
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedExamIds(new Set());
+    setSelectedAssignmentIds(new Set());
+  };
+
+  const switchTab = (tab) => {
+    exitSelectMode();
+    setActiveTab(tab);
+  };
+
+  const toggleSelectExam = (examId) => {
+    setSelectedExamIds(prev => {
+      const next = new Set(prev);
+      if (next.has(examId)) next.delete(examId);
+      else next.add(examId);
+      return next;
+    });
+  };
+
+  const toggleSelectAssignment = (assignmentId) => {
+    setSelectedAssignmentIds(prev => {
+      const next = new Set(prev);
+      if (next.has(assignmentId)) next.delete(assignmentId);
+      else next.add(assignmentId);
+      return next;
+    });
+  };
+
+  const isExamsTab = activeTab === 'exams';
+  const selectedCount = isExamsTab ? selectedExamIds.size : selectedAssignmentIds.size;
+  const totalCount = isExamsTab ? exams.length : assignments.length;
+  const allSelected = totalCount > 0 && selectedCount === totalCount;
+
+  const toggleSelectAll = () => {
+    if (isExamsTab) {
+      setSelectedExamIds(allSelected ? new Set() : new Set(exams.map(e => e.id)));
+    } else {
+      setSelectedAssignmentIds(allSelected ? new Set() : new Set(assignments.map(a => a.id)));
+    }
+  };
+
+  const confirmBulkDelete = async () => {
+    if (isBulkDeleting) return;
+    const ids = Array.from(isExamsTab ? selectedExamIds : selectedAssignmentIds);
+    if (ids.length === 0) return;
+
+    setIsBulkDeleting(true);
+    setToast({ type: 'info', message: `Đang xóa ${ids.length} mục...` });
+    const deleteFn = isExamsTab ? deleteExam : deleteAssignment;
+    const results = await Promise.all(ids.map(id => deleteFn(id)));
+    setIsBulkDeleting(false);
+    setShowConfirmBulkDelete(false);
+
+    const failed = results.filter(r => !r.success).length;
+    if (failed === 0) {
+      setToast({
+        type: 'success',
+        message: `Đã xóa ${ids.length} ${isExamsTab ? 'đề thi' : 'bài giao'}!`,
+      });
+    } else {
+      setToast({
+        type: failed === ids.length ? 'error' : 'warning',
+        message: `Xóa xong ${ids.length - failed}/${ids.length}, ${failed} mục lỗi`,
+      });
+    }
+    exitSelectMode();
+    loadData();
+  };
 
   const handleDeleteExam = (examId) => {
     setExamToDelete(examId);
@@ -187,7 +263,7 @@ const ExamBank = () => {
       {/* Tabs */}
       <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700">
         <button
-          onClick={() => setActiveTab('exams')}
+          onClick={() => switchTab('exams')}
           className={`px-6 py-3 font-medium transition-all ${activeTab === 'exams'
             ? 'text-primary border-b-2 border-primary'
             : 'text-[#608a67] dark:text-[#8ba890] hover:text-[#111812] dark:hover:text-white'
@@ -197,7 +273,7 @@ const ExamBank = () => {
           Tất cả đề thi ({exams.length})
         </button>
         <button
-          onClick={() => setActiveTab('assignments')}
+          onClick={() => switchTab('assignments')}
           className={`px-6 py-3 font-medium transition-all ${activeTab === 'assignments'
             ? 'text-primary border-b-2 border-primary'
             : 'text-[#608a67] dark:text-[#8ba890] hover:text-[#111812] dark:hover:text-white'
@@ -207,7 +283,7 @@ const ExamBank = () => {
           Bài đã giao ({assignments.length})
         </button>
         <button
-          onClick={() => setActiveTab('questions')}
+          onClick={() => switchTab('questions')}
           className={`px-6 py-3 font-medium transition-all ${activeTab === 'questions'
             ? 'text-primary border-b-2 border-primary'
             : 'text-[#608a67] dark:text-[#8ba890] hover:text-[#111812] dark:hover:text-white'
@@ -238,6 +314,45 @@ const ExamBank = () => {
         </div>
       )}
 
+      {/* Thanh chọn nhiều - xóa hàng loạt */}
+      {activeTab !== 'questions' && totalCount > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          {!selectMode ? (
+            <button
+              onClick={() => setSelectMode(true)}
+              className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-[#111812] dark:text-white rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center gap-2"
+            >
+              <Icon name="checklist" />
+              Chọn nhiều để xóa
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={toggleSelectAll}
+                className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-[#111812] dark:text-white rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center gap-2"
+              >
+                <Icon name={allSelected ? 'deselect' : 'select_all'} />
+                {allSelected ? 'Bỏ chọn tất cả' : `Chọn tất cả (${totalCount})`}
+              </button>
+              <button
+                onClick={() => setShowConfirmBulkDelete(true)}
+                disabled={selectedCount === 0}
+                className="px-4 py-2 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Icon name="delete_sweep" />
+                Xóa đã chọn ({selectedCount})
+              </button>
+              <button
+                onClick={exitSelectMode}
+                className="px-4 py-2 text-[#608a67] dark:text-[#8ba890] rounded-xl font-bold hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+              >
+                Hủy
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Content */}
       {activeTab === 'questions' ? (
         <QuestionBankPanel
@@ -265,6 +380,9 @@ const ExamBank = () => {
                 onDelete={handleDeleteExam}
                 onAssign={handleAssignExam}
                 onEdit={handleEditExam}
+                selectable={selectMode}
+                selected={selectedExamIds.has(exam.id)}
+                onToggleSelect={toggleSelectExam}
               />
             ))}
           </div>
@@ -291,8 +409,16 @@ const ExamBank = () => {
               const isExpired = daysLeft < 0;
 
               return (
-                <div key={assignment.id} className="clay-card p-4">
+                <div key={assignment.id} className={`clay-card p-4 ${selectMode && selectedAssignmentIds.has(assignment.id) ? 'ring-2 ring-primary' : ''}`}>
                   <div className="flex items-start justify-between gap-4">
+                    {selectMode && (
+                      <input
+                        type="checkbox"
+                        checked={selectedAssignmentIds.has(assignment.id)}
+                        onChange={() => toggleSelectAssignment(assignment.id)}
+                        className="mt-1 w-5 h-5 accent-green-600 cursor-pointer flex-shrink-0"
+                      />
+                    )}
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <Icon
@@ -307,7 +433,7 @@ const ExamBank = () => {
                       <div className="flex flex-wrap gap-3 text-sm">
                         <div className="flex items-center gap-1 text-[#608a67] dark:text-[#8ba890]">
                           <Icon name="group" className="text-sm" />
-                          <span>{assignedClass?.name || 'Lớp không xác định'}</span>
+                          <span>{assignedClass?.displayName || assignedClass?.name || 'Lớp không xác định'}</span>
                         </div>
 
                         <div className={`flex items-center gap-1 ${isExpired
@@ -423,6 +549,21 @@ const ExamBank = () => {
         title="Xóa bài giao"
         message="Bạn có chắc chắn muốn xóa bài giao này? Học sinh sẽ không còn thấy bài này nữa."
         confirmText="Xóa"
+        cancelText="Hủy"
+        type="danger"
+      />
+
+      <ConfirmModal
+        isOpen={showConfirmBulkDelete}
+        onClose={() => setShowConfirmBulkDelete(false)}
+        onConfirm={confirmBulkDelete}
+        title={isExamsTab ? 'Xóa nhiều đề thi' : 'Xóa nhiều bài giao'}
+        message={
+          isExamsTab
+            ? `Bạn có chắc chắn muốn xóa ${selectedCount} đề thi đã chọn? Hành động này không thể hoàn tác.`
+            : `Bạn có chắc chắn muốn xóa ${selectedCount} bài giao đã chọn? Học sinh sẽ không còn thấy các bài này nữa.`
+        }
+        confirmText="Xóa tất cả"
         cancelText="Hủy"
         type="danger"
       />
