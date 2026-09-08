@@ -5,6 +5,7 @@ import {
     forceFinishMatch,
     closeLobby,
 } from '../../services/versusSessionService';
+import { listenToMatchResults } from '../../services/versusGameService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useConfirm } from '../../hooks/useConfirm';
 import Icon from '../common/Icon';
@@ -131,6 +132,67 @@ function MatchCard({ sessionId, gameId }) {
 }
 
 /**
+ * Card 1 trận ĐÃ KẾT THÚC — đọc từ Firestore `versusMatchResults`.
+ */
+function ResultCard({ result }) {
+    const p1 = result.player1 || {};
+    const p2 = result.player2 || {};
+    const p1Won = !!result.winnerUid && result.winnerUid === p1.uid;
+    const p2Won = !!result.winnerUid && result.winnerUid === p2.uid;
+
+    let badge;
+    if (result.forceStopped) {
+        badge = { icon: 'block', text: 'GV kết thúc', className: 'bg-gray-200 text-gray-600 dark:bg-white/10 dark:text-gray-300' };
+    } else if (result.surrendered) {
+        badge = { icon: 'flag', text: 'Đầu hàng', className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' };
+    } else if (result.disconnectWin) {
+        badge = { icon: 'wifi_off', text: 'Mất kết nối', className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' };
+    } else {
+        badge = { icon: 'flag', text: 'Kết thúc', className: 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300' };
+    }
+
+    const time = result.createdAt?.toDate?.();
+    const duration = result.duration
+        ? `${Math.floor(result.duration / 60)}:${String(result.duration % 60).padStart(2, '0')}`
+        : null;
+
+    const renderPlayer = (p, won, colorClass) => (
+        <div className={`flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl ${won ? 'bg-amber-50 dark:bg-amber-500/10' : ''}`}>
+            <div className="flex items-center gap-2 min-w-0">
+                <Avatar name={p.name} size="xs" lazy={false} />
+                <span className={`text-sm truncate ${won ? 'font-extrabold text-amber-700 dark:text-amber-300' : 'font-bold text-[#111812] dark:text-white'}`}>
+                    {p.name || '?'}
+                </span>
+                {won && <span className="shrink-0 text-xs">🏆</span>}
+            </div>
+            <span className={`text-sm font-extrabold shrink-0 ${colorClass}`}>{p.score || 0}</span>
+        </div>
+    );
+
+    return (
+        <div className="clay-card p-4">
+            <div className="flex items-center justify-between gap-2 mb-2">
+                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${badge.className}`}>
+                    <Icon name={badge.icon} size={14} />
+                    {badge.text}
+                </span>
+                <span className="text-[11px] text-[#556958] dark:text-[#a5b5a8]">
+                    {time ? time.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : ''}
+                    {duration ? ` · ${duration}` : ''}
+                </span>
+            </div>
+
+            {renderPlayer(p1, p1Won, 'text-red-500')}
+            {renderPlayer(p2, p2Won, 'text-blue-500')}
+
+            {!result.winnerUid && (
+                <p className="mt-2 text-center text-xs text-[#556958] dark:text-[#a5b5a8]">Không có người thắng</p>
+            )}
+        </div>
+    );
+}
+
+/**
  * VersusSpectator — GV/Admin xem trực tiếp phòng "Đấu Trí 1v1":
  * danh sách HS trong phòng + score live các trận đang diễn ra.
  */
@@ -138,6 +200,7 @@ export default function VersusSpectator({ gameId, gameTitle, onClose }) {
     const { currentUser } = useAuth();
     const { showConfirm, ConfirmDialog } = useConfirm();
     const [lobby, setLobby] = useState(null);
+    const [results, setResults] = useState([]);
     const [loading, setLoading] = useState(true);
     const [closing, setClosing] = useState(false);
 
@@ -147,6 +210,13 @@ export default function VersusSpectator({ gameId, gameTitle, onClose }) {
             setLobby(data);
             setLoading(false);
         });
+        return () => unsubscribe();
+    }, [gameId]);
+
+    // Kết quả các trận đã xong (Firestore — còn lại kể cả khi session RTDB bị cleanup)
+    useEffect(() => {
+        if (!gameId) return;
+        const unsubscribe = listenToMatchResults(gameId, setResults);
         return () => unsubscribe();
     }, [gameId]);
 
@@ -288,6 +358,27 @@ export default function VersusSpectator({ gameId, gameTitle, onClose }) {
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                         {activeSessionIds.map((sessionId) => (
                             <MatchCard key={sessionId} sessionId={sessionId} gameId={gameId} />
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Kết quả các trận đã xong */}
+            <div className="clay-card p-5">
+                <h3 className="flex items-center gap-2 text-base font-bold text-[#111812] dark:text-white mb-4">
+                    <Icon name="emoji_events" size={22} className="text-amber-500" filled />
+                    Kết quả trận đã xong ({results.length})
+                </h3>
+                {results.length === 0 ? (
+                    <div className="py-8 text-center text-[#556958] dark:text-[#a5b5a8]">
+                        <Icon name="history" size={36} className="mb-2 opacity-60" />
+                        <p className="font-medium">Chưa có trận nào kết thúc.</p>
+                        <p className="text-sm mt-1">Kết quả thắng / thua sẽ hiện ở đây sau mỗi trận.</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        {results.map((r) => (
+                            <ResultCard key={r.id} result={r} />
                         ))}
                     </div>
                 )}

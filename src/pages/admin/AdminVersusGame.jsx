@@ -91,7 +91,7 @@ export default function AdminVersusGame() {
     const handleOpenLobby = async (game) => {
         try {
             setLobbyBusy(game.id);
-            const result = await openLobby(game.id, currentUser.uid, game.title);
+            const result = await openLobby(game.id, currentUser.uid, game.title, game.grade ?? null);
             if (!result.ok) {
                 if (result.reason === 'limit_reached') {
                     setToast({ type: 'warning', message: 'Đã đạt giới hạn phòng mở. Hãy đóng bớt phòng khác trước.' });
@@ -279,6 +279,10 @@ export default function AdminVersusGame() {
                                         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400 mb-4">
                                             <span className="inline-flex items-center gap-1">
                                                 <Icon name="quiz" size={16} /> {game.questions?.length || 0} câu
+                                            </span>
+                                            <span className="inline-flex items-center gap-1">
+                                                <Icon name="school" size={16} />
+                                                {game.grade ? `Khối ${game.grade}` : 'Mọi khối'}
                                             </span>
                                             <span className="inline-flex items-center gap-1">
                                                 <Icon name="flag" size={16} /> {game.winSteps} bước thắng

@@ -6,7 +6,9 @@ import {
     joinLobby,
     leaveLobby,
     getPlayerInLobby,
+    getLobbyGrade,
 } from '../services/versusSessionService';
+import { getStudentGrades } from '../services/leaderboardService';
 import VersusLobby from '../components/versus/VersusLobby';
 import VersusMatch from '../components/versus/VersusMatch';
 import Icon from '../components/common/Icon';
@@ -33,6 +35,19 @@ export default function VersusGame() {
     const [sessionId, setSessionId] = useState(null);
     const [joiningId, setJoiningId] = useState(null);
     const [toast, setToast] = useState(null);
+    // Khối của HS (từ các lớp được gán) — dùng lọc phòng theo khối
+    const [myGrades, setMyGrades] = useState([]);
+    const [gradesLoaded, setGradesLoaded] = useState(false);
+
+    // Lấy khối của HS từ danh sách lớp được gán
+    useEffect(() => {
+        let cancelled = false;
+        getStudentGrades(userProfile?.classes)
+            .then(gs => { if (!cancelled) setMyGrades(gs); })
+            .catch(() => { if (!cancelled) setMyGrades([]); })
+            .finally(() => { if (!cancelled) setGradesLoaded(true); });
+        return () => { cancelled = true; };
+    }, [userProfile?.classes]);
 
     // Lắng nghe danh sách phòng mở + reconnect check 1 lần khi mount.
     // didReconnect là biến cục bộ trong effect → StrictMode double-mount vẫn chạy đúng
@@ -88,6 +103,12 @@ export default function VersusGame() {
             const status = await getLobbyStatus(gameId);
             if (status !== 'open') {
                 setToast({ type: 'warning', message: 'Phòng này đã đóng, hãy chọn phòng khác nhé!' });
+                return;
+            }
+            // Chặn vào phòng khác khối (phòng grade = null thì mọi khối đều vào được)
+            const roomGrade = await getLobbyGrade(gameId);
+            if (roomGrade && !myGrades.includes(roomGrade)) {
+                setToast({ type: 'warning', message: `Phòng này chỉ dành cho học sinh khối ${roomGrade}.` });
                 return;
             }
             await joinLobby(gameId, uid, playerName, playerAvatar);
@@ -169,6 +190,8 @@ export default function VersusGame() {
                     openLobbies={openLobbies}
                     joiningId={joiningId}
                     onJoin={handleJoinRoom}
+                    myGrades={myGrades}
+                    gradesLoaded={gradesLoaded}
                 />
             )}
 
@@ -183,11 +206,26 @@ export default function VersusGame() {
     );
 }
 
-/** Danh sách phòng đang mở */
-function RoomList({ openLobbies, joiningId, onJoin }) {
-    const rooms = Object.entries(openLobbies || {}).sort(
+/** Danh sách phòng đang mở (chỉ hiện phòng thuộc khối của HS) */
+function RoomList({ openLobbies, joiningId, onJoin, myGrades, gradesLoaded }) {
+    const allRooms = Object.entries(openLobbies || {}).sort(
         (a, b) => (a[1]?.openedAt || 0) - (b[1]?.openedAt || 0)
     );
+    // Phòng không set khối (grade rỗng) → mọi khối đều thấy
+    const rooms = allRooms.filter(([, room]) => {
+        const g = Number(room?.grade) || 0;
+        return g === 0 || myGrades.includes(g);
+    });
+    const hiddenCount = allRooms.length - rooms.length;
+
+    if (!gradesLoaded) {
+        return (
+            <div className="clay-card p-10 text-center">
+                <div className="text-5xl mb-3 animate-bounce">⚔️</div>
+                <p className="text-gray-600 dark:text-gray-400">Đang tải danh sách phòng...</p>
+            </div>
+        );
+    }
 
     if (rooms.length === 0) {
         return (
@@ -197,7 +235,9 @@ function RoomList({ openLobbies, joiningId, onJoin }) {
                     Chưa có phòng đấu nào đang mở...
                 </h2>
                 <p className="text-gray-600 dark:text-gray-400">
-                    Hãy đợi thầy cô mở phòng đấu nhé! Trang sẽ tự cập nhật khi có phòng mới.
+                    {hiddenCount > 0
+                        ? 'Đang có phòng đấu nhưng dành cho khối khác. Hãy đợi phòng dành cho khối của em nhé!'
+                        : 'Hãy đợi thầy cô mở phòng đấu nhé! Trang sẽ tự cập nhật khi có phòng mới.'}
                 </p>
             </div>
         );
@@ -218,6 +258,7 @@ function RoomList({ openLobbies, joiningId, onJoin }) {
                             <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
                                 <span className="inline-block size-2 rounded-full bg-primary animate-pulse" />
                                 Đang mở
+                                {Number(room?.grade) > 0 && ` • Khối ${room.grade}`}
                             </p>
                         </div>
                     </div>

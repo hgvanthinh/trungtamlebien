@@ -10,6 +10,7 @@ import {
     where,
     orderBy,
     limit,
+    startAfter,
     serverTimestamp,
     writeBatch
 } from 'firebase/firestore';
@@ -35,6 +36,7 @@ import { deleteQuestionImage } from './storageService';
  *   correctAnswer, alternativeAnswers: []
  *
  *   grade, difficulty,                       // metadata lọc (trung tâm chỉ dạy Toán nên không có field môn)
+ *   folderId,                                // thư mục người dùng tự tạo (null = chưa phân loại)
  *   createdBy, createdAt, updatedAt
  * }
  */
@@ -68,7 +70,9 @@ export const normalizeQuestion = (q) => {
         inputMode,
         questionText: (q.questionText || '').trim(),
         grade: q.grade ?? null,
-        difficulty: q.difficulty || 'medium'
+        difficulty: q.difficulty || 'medium',
+        // Chuỗi rỗng cũng coi là chưa phân loại — select HTML trả '' khi chọn mục trống
+        folderId: q.folderId || null
     };
     if (inputMode === 'image' || q.questionImage?.trim()) {
         base.questionImage = (q.questionImage || '').trim();
@@ -243,6 +247,36 @@ export const getQuestions = async () => {
 };
 
 /**
+ * Lấy một trang câu hỏi theo cursor, mới nhất trước.
+ * Dùng cho kho câu hỏi để không phải đọc cả collection mỗi lần mở tab.
+ * @param {number} pageSize - Số câu mỗi trang
+ * @param {Object|null} cursor - Doc snapshot cuối của trang trước (null = trang đầu)
+ * @returns {Promise<Object>} - { items, cursor, hasMore }
+ */
+export const getQuestionsPage = async (pageSize = 20, cursor = null) => {
+    try {
+        const parts = [collection(db, COLLECTION), orderBy('createdAt', 'desc')];
+        if (cursor) parts.push(startAfter(cursor));
+        // Lấy dư 1 doc để biết còn trang sau hay không, khỏi tốn thêm 1 query đếm
+        parts.push(limit(pageSize + 1));
+
+        const snapshot = await getDocs(query(...parts));
+        const docs = snapshot.docs;
+        const hasMore = docs.length > pageSize;
+        const pageDocs = hasMore ? docs.slice(0, pageSize) : docs;
+
+        return {
+            items: pageDocs.map(d => ({ id: d.id, ...d.data() })),
+            cursor: pageDocs.length ? pageDocs[pageDocs.length - 1] : null,
+            hasMore
+        };
+    } catch (error) {
+        console.error('Error getting questions page:', error);
+        throw error;
+    }
+};
+
+/**
  * Thêm 1 câu hỏi vào kho.
  * @param {Object} data - Dữ liệu câu hỏi
  * @param {string} createdBy - uid người tạo
@@ -373,6 +407,34 @@ export const deleteQuestionsBatch = async (ids) => {
         await cleanupQuestionImages(imageUrls);
     } catch (error) {
         console.error('Error batch deleting questions:', error);
+        throw error;
+    }
+};
+
+/**
+ * Chuyển nhiều câu hỏi sang một thư mục (hoặc bỏ khỏi thư mục nếu folderId = null).
+ * @param {Array<string>} ids - Danh sách ID câu hỏi
+ * @param {string|null} folderId - Thư mục đích, null = "Chưa phân loại"
+ * @returns {Promise<number>} - Số câu đã chuyển
+ */
+export const moveQuestionsToFolder = async (ids, folderId) => {
+    if (!ids || ids.length === 0) return 0;
+    try {
+        const target = folderId || null;
+        // Firestore giới hạn 500 thao tác/batch
+        for (let i = 0; i < ids.length; i += 400) {
+            const batch = writeBatch(db);
+            ids.slice(i, i + 400).forEach(id => {
+                batch.update(doc(db, COLLECTION, id), {
+                    folderId: target,
+                    updatedAt: serverTimestamp()
+                });
+            });
+            await batch.commit();
+        }
+        return ids.length;
+    } catch (error) {
+        console.error('Error moving questions to folder:', error);
         throw error;
     }
 };

@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { getQuestions, toVersusQuestion } from '../../services/questionBankService';
+import { getFolders } from '../../services/questionFolderService';
+import FolderChips from './FolderChips';
 import QuestionCard from './QuestionCard';
 import QuestionFilters from './QuestionFilters';
 import { applyQuestionFilters } from '../../utils/applyQuestionFilters';
 import Icon from '../common/Icon';
 import Button from '../common/Button';
 
-const EMPTY_FILTERS = { search: '', type: '', grade: '', difficulty: '' };
+const EMPTY_FILTERS = { search: '', type: '', grade: '', difficulty: '', folderId: '' };
 
 /**
  * Modal chọn nhiều câu hỏi từ kho để nhúng vào bài đấu.
@@ -15,14 +17,16 @@ const EMPTY_FILTERS = { search: '', type: '', grade: '', difficulty: '' };
  */
 export default function QuestionPickerModal({ onPick, onClose }) {
     const [questions, setQuestions] = useState([]);
+    const [folders, setFolders] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [filters, setFilters] = useState(EMPTY_FILTERS);
     const [selectedIds, setSelectedIds] = useState([]);
+    const [randomCount, setRandomCount] = useState(10);
 
     useEffect(() => {
-        getQuestions()
-            .then(setQuestions)
+        Promise.all([getQuestions(), getFolders()])
+            .then(([list, folderList]) => { setQuestions(list); setFolders(folderList); })
             .catch(() => setError('Lỗi khi tải kho câu hỏi'))
             .finally(() => setLoading(false));
     }, []);
@@ -44,6 +48,24 @@ export default function QuestionPickerModal({ onPick, onClose }) {
             ? prev.filter(id => !ids.includes(id))
             : [...new Set([...prev, ...ids])]
         );
+    };
+
+    /**
+     * Lấy ngẫu nhiên X câu TRONG danh sách đã lọc (thay thế lựa chọn hiện tại
+     * của nhóm đang hiển thị, giữ nguyên các câu đã chọn ở bộ lọc khác).
+     */
+    const handlePickRandom = () => {
+        const n = Math.min(Math.max(1, Number(randomCount) || 0), filtered.length);
+        if (n <= 0) return;
+        // Fisher-Yates trên bản copy
+        const pool = [...filtered];
+        for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        const pickedIds = pool.slice(0, n).map(q => q.id);
+        const filteredIds = new Set(filtered.map(q => q.id));
+        setSelectedIds(prev => [...prev.filter(id => !filteredIds.has(id)), ...pickedIds]);
     };
 
     const handleConfirm = () => {
@@ -74,16 +96,59 @@ export default function QuestionPickerModal({ onPick, onClose }) {
 
                 <div className="px-6 py-3 border-b border-gray-200 dark:border-gray-700 space-y-3">
                     <QuestionFilters filters={filters} onChange={setFilters} />
-                    {filtered.length > 0 && (
-                        <label className="flex items-center gap-2 cursor-pointer select-none text-sm font-semibold text-gray-700 dark:text-gray-300">
-                            <input
-                                type="checkbox"
-                                checked={allFilteredSelected}
-                                onChange={toggleSelectAll}
-                                className="w-4 h-4 text-blue-600 rounded"
+                    {folders.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                            <FolderChips
+                                folders={folders}
+                                questions={questions}
+                                activeId={filters.folderId}
+                                onSelect={(id) => setFilters(prev => ({ ...prev, folderId: id }))}
                             />
-                            Chọn tất cả ({filtered.length} câu đang hiển thị)
-                        </label>
+                        </div>
+                    )}
+                    {filtered.length > 0 && (
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <label className="flex items-center gap-2 cursor-pointer select-none text-sm font-semibold text-gray-700 dark:text-gray-300">
+                                <input
+                                    type="checkbox"
+                                    checked={allFilteredSelected}
+                                    onChange={toggleSelectAll}
+                                    className="w-4 h-4 text-blue-600 rounded"
+                                />
+                                Chọn tất cả ({filtered.length} câu đang hiển thị)
+                            </label>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={filtered.length}
+                                    value={randomCount}
+                                    onChange={(e) => setRandomCount(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            handlePickRandom();
+                                        }
+                                    }}
+                                    className="w-20 px-2.5 py-1.5 text-sm font-semibold text-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    aria-label="Số câu lấy ngẫu nhiên"
+                                />
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    icon="shuffle"
+                                    onClick={handlePickRandom}
+                                    disabled={!Number(randomCount) || Number(randomCount) < 1}
+                                >
+                                    Lấy ngẫu nhiên
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                    {filtered.length > 0 && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Lấy ngẫu nhiên áp dụng trên {filtered.length} câu đang hiển thị (sau khi lọc).
+                        </p>
                     )}
                 </div>
 
@@ -115,6 +180,7 @@ export default function QuestionPickerModal({ onPick, onClose }) {
                                     selectable
                                     selected={selectedIds.includes(q.id)}
                                     onToggle={toggleSelect}
+                                    folder={folders.find(f => f.id === q.folderId) || null}
                                 />
                             ))}
                         </div>

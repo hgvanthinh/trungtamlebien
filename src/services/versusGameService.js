@@ -7,6 +7,9 @@ import {
     updateDoc,
     deleteDoc,
     query,
+    where,
+    limit,
+    onSnapshot,
     orderBy,
     serverTimestamp
 } from 'firebase/firestore';
@@ -123,4 +126,29 @@ export const deleteVersusGame = async (gameId) => {
         console.error('Error deleting versus game:', error);
         throw error;
     }
+};
+
+/**
+ * Listen realtime các trận ĐÃ KẾT THÚC của 1 bộ đề (collection `versusMatchResults`).
+ * Dùng cho màn hình "Xem trực tiếp" của GV/Admin để thấy ai thắng ai thua.
+ * @param {string} gameId
+ * @param {Function} callback - nhận mảng result đã sort mới nhất trước
+ * @param {number} max - số trận tối đa lấy về
+ * @returns {Function} unsubscribe
+ */
+export const listenToMatchResults = (gameId, callback, max = 20) => {
+    const q = query(
+        collection(db, 'versusMatchResults'),
+        where('gameId', '==', gameId),
+        orderBy('createdAt', 'desc'),
+        limit(max)
+    );
+    return onSnapshot(
+        q,
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+        (error) => {
+            console.error('Error listening to match results:', error);
+            callback([]);
+        }
+    );
 };

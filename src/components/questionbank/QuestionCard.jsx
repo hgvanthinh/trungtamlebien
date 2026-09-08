@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { QUESTION_TYPES, DIFFICULTIES } from '../../services/questionBankService';
 import { MathText } from '../math';
 import Icon from '../common/Icon';
@@ -16,6 +17,7 @@ const DIFFICULTY_STYLES = {
  * @param {Function} onToggle - Bật/tắt chọn
  * @param {Function} onEdit - Sửa (ẩn nếu không truyền)
  * @param {Function} onDelete - Xóa (ẩn nếu không truyền)
+ * @param {Object|null} folder - Thư mục chứa câu hỏi (hiện nhãn, null = chưa phân loại)
  */
 export default function QuestionCard({
     question,
@@ -23,10 +25,13 @@ export default function QuestionCard({
     selected = false,
     onToggle,
     onEdit,
-    onDelete
+    onDelete,
+    folder = null
 }) {
     const type = question.type || 'abcd';
     const isImage = question.inputMode === 'image';
+    // Ảnh phóng to chỉ render khi người dùng thực sự bấm xem
+    const [zoomed, setZoomed] = useState(false);
 
     const renderAnswers = () => {
         if (type === 'true_false') {
@@ -122,6 +127,11 @@ export default function QuestionCard({
                 <div className="flex-1 min-w-0">
                     {/* Badge metadata */}
                     <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                        {folder && (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                                {folder.icon || '📁'} {folder.name}
+                            </span>
+                        )}
                         <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
                             {QUESTION_TYPES[type]}
                         </span>
@@ -151,13 +161,25 @@ export default function QuestionCard({
                     )}
 
                     {question.questionImage && (
-                        <div className="mb-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-1.5 overflow-x-auto">
-                            <img
-                                src={question.questionImage}
-                                alt="Ảnh câu hỏi"
-                                loading="lazy"
-                                className="max-h-56 rounded"
-                            />
+                        <div className="mb-2">
+                            {/* Preview nhỏ cho đỡ tốn băng thông; bấm để xem ảnh đầy đủ */}
+                            <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setZoomed(true); }}
+                                title="Bấm để xem ảnh đầy đủ"
+                                className="group relative inline-block rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-1 overflow-hidden"
+                            >
+                                <img
+                                    src={question.questionImage}
+                                    alt="Ảnh câu hỏi"
+                                    loading="lazy"
+                                    decoding="async"
+                                    className="max-h-24 max-w-full rounded object-contain"
+                                />
+                                <span className="absolute bottom-1 right-1 flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Icon name="zoom_in" size={12} /> Xem to
+                                </span>
+                            </button>
                         </div>
                     )}
 
@@ -189,6 +211,29 @@ export default function QuestionCard({
                     </div>
                 )}
             </div>
+
+            {/* Lightbox: chỉ tải/hiện ảnh cỡ đầy đủ khi được bấm */}
+            {zoomed && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+                    onClick={e => { e.stopPropagation(); setZoomed(false); }}
+                >
+                    <img
+                        src={question.questionImage}
+                        alt="Ảnh câu hỏi"
+                        className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
+                        onClick={e => e.stopPropagation()}
+                    />
+                    <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); setZoomed(false); }}
+                        className="absolute top-4 right-4 p-2 rounded-full bg-white/90 text-gray-800 hover:bg-white"
+                        title="Đóng"
+                    >
+                        <Icon name="close" size={20} />
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

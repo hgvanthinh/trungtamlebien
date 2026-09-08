@@ -11,6 +11,8 @@ import Toast from '../common/Toast';
 const inputCls = "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent";
 const labelCls = "block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1";
 
+const GRADES = [6, 7, 8, 9, 10, 11, 12];
+
 const QUESTION_TYPE_LABELS = {
     abcd: '🅰️ Trắc nghiệm A-B-C-D',
     true_false: '✅ Đúng / Sai',
@@ -55,6 +57,8 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
     const [freezeDuration, setFreezeDuration] = useState(game?.freezeDuration ?? 3);
     const [shuffleAnswers, setShuffleAnswers] = useState(game?.shuffleAnswers ?? true);
     const [maxMatches, setMaxMatches] = useState(game?.maxMatches ?? 20);
+    // grade = null / '' → phòng mở cho mọi khối
+    const [grade, setGrade] = useState(game?.grade ?? '');
     const [questions, setQuestions] = useState(game?.questions ? game.questions.map(q => ({ ...q })) : []);
 
     const [showTypePicker, setShowTypePicker] = useState(false);
@@ -202,7 +206,10 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
         for (let i = 0; i < questions.length; i++) {
             const q = questions[i];
             const label = `Câu ${i + 1}`;
-            if (!q.questionText?.trim()) return `${label}: chưa nhập nội dung câu hỏi`;
+            // Câu dạng ảnh: đề nằm trong ảnh nên questionText chỉ là ghi chú, không bắt buộc
+            if (!q.questionText?.trim() && !q.questionImage?.trim()) {
+                return `${label}: chưa nhập nội dung câu hỏi`;
+            }
 
             const type = q.type || 'abcd';
             if (type === 'abcd') {
@@ -265,6 +272,8 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
             freezeDuration: Math.max(0, Number(freezeDuration) || 3),
             shuffleAnswers: !!shuffleAnswers,
             maxMatches: Math.max(1, Number(maxMatches) || 20),
+            // Khối được phép chơi: null = tất cả các khối
+            grade: grade === '' || grade === null ? null : Number(grade),
             questions: cleanQuestions
         };
 
@@ -285,37 +294,40 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
     // ===== Render từng loại câu hỏi =====
 
     const renderAbcd = (q, qIndex) => (
-        <div className="space-y-3">
-            <div>
-                <label className={labelCls}>4 đáp án (chọn đáp án đúng)</label>
-                <div className="space-y-2">
-                    {q.answers.map((a, aIndex) => (
-                        <div key={aIndex} className="flex items-start gap-2">
-                            <input
-                                type="radio"
-                                name={`correct-${qIndex}`}
-                                checked={a.isCorrect}
-                                onChange={() => setCorrectAnswer(qIndex, aIndex)}
-                                className="w-4 h-4 mt-10 text-green-600 shrink-0"
-                                title="Đáp án đúng"
+        <div>
+            <label className={labelCls}>4 đáp án (chọn đáp án đúng)</label>
+            {/* Lưới 2x2 trên màn rộng, xếp dọc trên mobile — đồng bộ với modal Thêm câu hỏi vào kho */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {q.answers.map((a, aIndex) => (
+                    <div key={aIndex} className="relative flex items-start gap-2">
+                        <span className="w-6 mt-9 font-bold text-gray-500 dark:text-gray-400 shrink-0">
+                            {String.fromCharCode(65 + aIndex)}.
+                        </span>
+                        <div className="flex-1 min-w-0">
+                            <MathEditor
+                                value={a.text}
+                                onChange={v => updateAnswer(qIndex, aIndex, v)}
+                                placeholder={`Đáp án ${String.fromCharCode(65 + aIndex)}`}
+                                rows={1}
+                                variant="outlined"
+                                size="small"
+                                showPreview
                             />
-                            <span className="w-6 mt-9 font-bold text-gray-500 dark:text-gray-400 shrink-0">
-                                {String.fromCharCode(65 + aIndex)}.
-                            </span>
-                            <div className={`flex-1 min-w-0 rounded-lg ${a.isCorrect ? 'ring-2 ring-green-400 dark:ring-green-600 p-1' : ''}`}>
-                                <MathEditor
-                                    value={a.text}
-                                    onChange={v => updateAnswer(qIndex, aIndex, v)}
-                                    placeholder={`Đáp án ${String.fromCharCode(65 + aIndex)}`}
-                                    rows={1}
-                                    variant="outlined"
-                                    size="small"
-                                    showPreview
-                                />
-                            </div>
                         </div>
-                    ))}
-                </div>
+                        {/* Tích xanh góc trên phải: bấm để chọn đáp án đúng */}
+                        <button
+                            type="button"
+                            onClick={() => setCorrectAnswer(qIndex, aIndex)}
+                            title="Đánh dấu là đáp án đúng"
+                            className={`absolute top-0 right-0 z-10 w-5 h-5 rounded-full flex items-center justify-center transition-colors ${a.isCorrect
+                                ? 'bg-green-500 text-white'
+                                : 'bg-gray-200 dark:bg-gray-600 text-transparent hover:bg-gray-300 dark:hover:bg-gray-500 hover:text-white/70'
+                                }`}
+                        >
+                            <Icon name="check" size={14} />
+                        </button>
+                    </div>
+                ))}
             </div>
         </div>
     );
@@ -384,7 +396,7 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
                 />
             </div>
             <div>
-                <label className={labelCls}>Đáp án thay thế (chấp nhận thêm, không bắt buộc)</label>
+                <label className={labelCls}>Đáp án thay thế (không bắt buộc)</label>
                 <div className="space-y-2">
                     {(q.alternativeAnswers || []).map((alt, aIndex) => (
                         <div key={aIndex} className="flex items-center gap-2">
@@ -434,6 +446,22 @@ export default function VersusGameForm({ game = null, onSaved, onCancel }) {
                             value={title}
                             onChange={e => setTitle(e.target.value)}
                         />
+                    </div>
+                    <div>
+                        <label className={labelCls}>Khối được phép chơi</label>
+                        <select
+                            className={inputCls}
+                            value={grade}
+                            onChange={e => setGrade(e.target.value)}
+                        >
+                            <option value="">Tất cả các khối</option>
+                            {GRADES.map(g => (
+                                <option key={g} value={g}>Khối {g}</option>
+                            ))}
+                        </select>
+                        <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                            Chọn khối để chỉ học sinh thuộc khối đó nhìn thấy và vào được phòng này.
+                        </p>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div>
@@ -608,12 +636,36 @@ D. Đáp án 4
                                         </div>
                                     </div>
 
+                                    {/* Ảnh đề (câu dạng 🖼️ Tải ảnh đề lấy từ Kho câu hỏi) */}
+                                    {q.questionImage && (
+                                        <div className="mb-3">
+                                            <label className={labelCls}>Ảnh đề</label>
+                                            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 p-2 overflow-x-auto">
+                                                <img
+                                                    src={q.questionImage}
+                                                    alt={`Ảnh đề câu ${qIndex + 1}`}
+                                                    className="max-h-72 mx-auto rounded-lg"
+                                                    loading="lazy"
+                                                />
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => updateQuestion(qIndex, { questionImage: '' })}
+                                                className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-red-600 dark:text-red-400 hover:underline"
+                                            >
+                                                <Icon name="delete" size={16} /> Xóa ảnh đề
+                                            </button>
+                                        </div>
+                                    )}
+
                                     <div className="mb-3">
-                                        <label className={labelCls}>Nội dung câu hỏi *</label>
+                                        <label className={labelCls}>
+                                            {q.questionImage ? 'Ghi chú / mã câu hỏi' : 'Nội dung câu hỏi *'}
+                                        </label>
                                         <MathEditor
                                             value={q.questionText}
                                             onChange={v => updateQuestion(qIndex, { questionText: v })}
-                                            placeholder="Nhập nội dung câu hỏi..."
+                                            placeholder={q.questionImage ? 'VD: Câu 5 - Đề ôn tập chương 1' : 'Nhập nội dung câu hỏi...'}
                                             rows={2}
                                             variant="outlined"
                                             size="medium"

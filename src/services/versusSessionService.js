@@ -90,9 +90,10 @@ export async function getActiveLobbies(teacherId) {
  * @param {string} gameId - id doc Firestore versusGames
  * @param {string} teacherId - adminUid
  * @param {string} title - tên game hiển thị cho HS ở danh sách phòng mở
+ * @param {number|null} grade - khối được phép chơi (null = tất cả các khối)
  * @returns {Promise<{ ok: boolean, reason?: 'limit_reached' }>}
  */
-export async function openLobby(gameId, teacherId, title = '') {
+export async function openLobby(gameId, teacherId, title = '', grade = null) {
     const openIds = await getActiveLobbies(teacherId);
 
     // Phòng này đã mở rồi thì mở lại bình thường (idempotent)
@@ -101,18 +102,20 @@ export async function openLobby(gameId, teacherId, title = '') {
     }
 
     const now = Date.now();
+    const safeGrade = Number(grade) > 0 ? Number(grade) : null;
     await set(ref(realtimeDb, `${LOBBIES_PATH}/${gameId}`), {
         status: 'open',
         openedAt: now,
         lastActivityAt: now,
         teacherId,
+        grade: safeGrade,
         players: {},
         challenges: {},
     });
 
-    // Ghi pointer + danh sách phòng đang mở cho HS
+    // Ghi pointer + danh sách phòng đang mở cho HS (grade để HS lọc phòng theo khối)
     await set(ref(realtimeDb, `${ACTIVE_LOBBY_PATH}/${teacherId}/${gameId}`), true);
-    await set(ref(realtimeDb, `${OPEN_LOBBIES_PATH}/${gameId}`), { title, openedAt: now });
+    await set(ref(realtimeDb, `${OPEN_LOBBIES_PATH}/${gameId}`), { title, openedAt: now, grade: safeGrade });
     return { ok: true };
 }
 
@@ -148,6 +151,16 @@ export async function deleteLobby(gameId, teacherId) {
     if (teacherId) {
         await remove(ref(realtimeDb, `${ACTIVE_LOBBY_PATH}/${teacherId}/${gameId}`));
     }
+}
+
+/**
+ * Lấy khối được phép chơi của 1 phòng (null = mọi khối).
+ * @returns {Promise<number|null>}
+ */
+export async function getLobbyGrade(gameId) {
+    const snap = await get(ref(realtimeDb, `${LOBBIES_PATH}/${gameId}/grade`));
+    const g = Number(snap.val());
+    return g > 0 ? g : null;
 }
 
 /**

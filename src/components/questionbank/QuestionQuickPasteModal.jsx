@@ -21,13 +21,15 @@ D. Đáp án 4
 
 /**
  * Modal dán nhanh nhiều câu ABCD vào kho, gắn chung metadata môn/khối/độ khó.
- * @param {Object} defaults - Metadata mặc định { grade, difficulty }
+ * @param {Object} defaults - Metadata mặc định { grade, difficulty, folderId }
+ * @param {Array} folders - Danh sách thư mục để chọn nơi lưu
  * @param {string} createdBy - uid người tạo
  * @param {Function} onSaved - gọi sau khi lưu thành công, nhận message
  * @param {Function} onClose - gọi khi đóng modal
  */
 export default function QuestionQuickPasteModal({
     defaults = {},
+    folders = [],
     createdBy = null,
     onSaved,
     onClose
@@ -36,6 +38,7 @@ export default function QuestionQuickPasteModal({
     const [result, setResult] = useState(null); // { questions, errors }
     const [grade, setGrade] = useState(defaults.grade ?? '');
     const [difficulty, setDifficulty] = useState(defaults.difficulty || 'medium');
+    const [folderId, setFolderId] = useState(defaults.folderId || '');
     const [saving, setSaving] = useState(false);
     const [toast, setToast] = useState(null);
 
@@ -49,7 +52,8 @@ export default function QuestionQuickPasteModal({
                 ...q,
                 type: 'abcd',
                 grade: grade === '' ? null : Number(grade),
-                difficulty
+                difficulty,
+                folderId: folderId || null
             }));
             const count = await createQuestionsBatch(list, createdBy);
             onSaved?.(`Đã thêm ${count} câu hỏi vào kho!`);
@@ -76,7 +80,16 @@ export default function QuestionQuickPasteModal({
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                            <label className={labelCls}>Thư mục (áp cho tất cả)</label>
+                            <select className={inputCls} value={folderId} onChange={e => setFolderId(e.target.value)}>
+                                <option value="">📥 Chưa phân loại</option>
+                                {folders.map(f => (
+                                    <option key={f.id} value={f.id}>{f.icon || '📁'} {f.name}</option>
+                                ))}
+                            </select>
+                        </div>
                         <div>
                             <label className={labelCls}>Khối lớp (áp cho tất cả)</label>
                             <select className={inputCls} value={grade} onChange={e => setGrade(e.target.value)}>

@@ -161,7 +161,8 @@ export const deleteAvatar = async (avatarUrl) => {
 
 /**
  * Kiểm tra + nén ảnh câu hỏi NGAY TẠI MÁY, chưa upload.
- * Nén nhẹ hơn avatar (400KB, cạnh dài 1600px) để chữ/công thức còn đọc rõ.
+ * 200KB / cạnh dài 1200px: đủ nét để đọc chữ và công thức khi phóng to,
+ * nhưng nhẹ hơn hẳn khi kho hiển thị hàng chục câu cùng lúc.
  * @param {File} file - File ảnh câu hỏi
  * @returns {Promise<Object>} - { success, blob, previewUrl, size } hoặc { success: false, error }
  */
@@ -177,7 +178,7 @@ export const prepareQuestionImage = async (file) => {
       throw new Error('Kích thước ảnh gốc không được vượt quá 10MB');
     }
 
-    const blob = await compressImage(file, 400, 1600);
+    const blob = await compressImage(file, 200, 1200);
     // previewUrl là blob: URL cục bộ, chưa hề chạm tới Storage
     return { success: true, blob, previewUrl: URL.createObjectURL(blob), size: blob.size };
   } catch (error) {

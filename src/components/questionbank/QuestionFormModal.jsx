@@ -48,7 +48,8 @@ const makeEmpty = (type, inputMode = 'text') => {
  * @param {Object|null} question - null = tạo mới, khác null = sửa (cần question.id)
  * @param {string} defaultType - Loại câu hỏi mặc định khi tạo mới
  * @param {string} defaultInputMode - 'text' (gõ tay) hoặc 'image' (tải ảnh đề)
- * @param {Object} defaults - Metadata mặc định { grade, difficulty }
+ * @param {Object} defaults - Metadata mặc định { grade, difficulty, folderId }
+ * @param {Array} folders - Danh sách thư mục để chọn nơi lưu câu hỏi
  * @param {string} createdBy - uid người tạo
  * @param {Function} onSaved - gọi sau khi lưu thành công
  * @param {Function} onClose - gọi khi đóng modal
@@ -58,6 +59,7 @@ export default function QuestionFormModal({
     defaultType = 'abcd',
     defaultInputMode = 'text',
     defaults = {},
+    folders = [],
     createdBy = null,
     onSaved,
     onClose
@@ -72,7 +74,8 @@ export default function QuestionFormModal({
         return {
             ...makeEmpty(defaultType, defaultInputMode),
             grade: defaults.grade ?? null,
-            difficulty: defaults.difficulty || 'medium'
+            difficulty: defaults.difficulty || 'medium',
+            folderId: defaults.folderId || null
         };
     });
     const [saving, setSaving] = useState(false);
@@ -80,6 +83,8 @@ export default function QuestionFormModal({
     // Có ảnh mới chọn đang chờ upload hay không (dùng để render, blob nằm ở ref)
     const [hasPendingImage, setHasPendingImage] = useState(false);
     const [toast, setToast] = useState(null);
+    // Số câu đã thêm liên tiếp trong lần mở modal này (chỉ dùng khi tạo mới)
+    const [addedCount, setAddedCount] = useState(0);
     const fileInputRef = useRef(null);
     // Blob ảnh đã nén, đang chờ upload khi bấm lưu (null = không đổi ảnh)
     const pendingBlobRef = useRef(null);
@@ -95,7 +100,8 @@ export default function QuestionFormModal({
             questionText: prev.questionText,
             questionImage: prev.questionImage,
             grade: prev.grade,
-            difficulty: prev.difficulty
+            difficulty: prev.difficulty,
+            folderId: prev.folderId ?? null
         }));
     };
 
@@ -107,8 +113,9 @@ export default function QuestionFormModal({
                 ...makeEmpty(prev.type || 'abcd', mode),
                 questionText: prev.questionText,
                 questionImage: prev.questionImage,
-                    grade: prev.grade,
-                difficulty: prev.difficulty
+                grade: prev.grade,
+                difficulty: prev.difficulty,
+                folderId: prev.folderId ?? null
             };
         });
     };
@@ -153,6 +160,11 @@ export default function QuestionFormModal({
     const handleClose = () => {
         revokePreview(form.questionImage);
         pendingBlobRef.current = null;
+        // Đã thêm được câu nào thì báo tổng kết thay vì đóng im lặng
+        if (addedCount > 0) {
+            onSaved?.(`Đã thêm ${addedCount} câu hỏi vào kho!`);
+            return;
+        }
         onClose?.();
     };
 
@@ -214,7 +226,11 @@ export default function QuestionFormModal({
         }));
     };
 
-    const handleSave = async () => {
+    /**
+     * Lưu câu hỏi.
+     * @param {boolean} keepOpen - true = giữ modal mở, reset form để soạn câu tiếp theo
+     */
+    const handleSave = async (keepOpen = false) => {
         const error = validateQuestion(form);
         if (error) {
             setToast({ type: 'error', message: error });
@@ -246,6 +262,26 @@ export default function QuestionFormModal({
             } else {
                 await createQuestion(payload, createdBy);
             }
+
+            if (keepOpen && !isEdit) {
+                // Reset phần nội dung, giữ lại loại câu / cách nhập / lớp / độ khó
+                // để giáo viên soạn tiếp câu cùng dạng mà không phải chọn lại.
+                const next = addedCount + 1;
+                setAddedCount(next);
+                setForm(prev => ({
+                    ...makeEmpty(prev.type || 'abcd', prev.inputMode),
+                    grade: prev.grade ?? null,
+                    difficulty: prev.difficulty || 'medium',
+                    folderId: prev.folderId ?? null
+                }));
+                pendingBlobRef.current = null;
+                setHasPendingImage(false);
+                setSaving(false);
+                setToast({ type: 'success', message: `Đã thêm câu ${next} — soạn tiếp câu mới` });
+                // Không reload cả kho sau mỗi câu — danh sách refresh 1 lần khi đóng modal
+                return;
+            }
+
             onSaved?.(isEdit ? 'Đã cập nhật câu hỏi!' : 'Đã thêm câu hỏi vào kho!');
         } catch (err) {
             setToast({ type: 'error', message: 'Lỗi khi lưu câu hỏi: ' + err.message });
@@ -262,6 +298,11 @@ export default function QuestionFormModal({
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
                     <h3 className="font-bold text-lg text-gray-900 dark:text-white">
                         {isEdit ? '✏️ Sửa câu hỏi' : '➕ Thêm câu hỏi vào kho'}
+                        {!isEdit && addedCount > 0 && (
+                            <span className="ml-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                                (đã thêm {addedCount} câu)
+                            </span>
+                        )}
                     </h3>
                     <button
                         type="button"
@@ -327,7 +368,20 @@ export default function QuestionFormModal({
                     </div>
 
                     {/* Metadata */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                            <label className={labelCls}>Thư mục</label>
+                            <select
+                                className={inputCls}
+                                value={form.folderId || ''}
+                                onChange={e => patch({ folderId: e.target.value || null })}
+                            >
+                                <option value="">📥 Chưa phân loại</option>
+                                {folders.map(f => (
+                                    <option key={f.id} value={f.id}>{f.icon || '📁'} {f.name}</option>
+                                ))}
+                            </select>
+                        </div>
                         <div>
                             <label className={labelCls}>Khối lớp</label>
                             <select
@@ -468,49 +522,42 @@ export default function QuestionFormModal({
                                 </p>
                             </div>
                         ) : (
-                            <>
-                                <div>
-                                    <label className={labelCls}>4 đáp án (chọn đáp án đúng)</label>
-                                    <div className="space-y-2">
-                                        {form.answers.map((a, i) => (
-                                            <div key={i} className="flex items-start gap-2">
-                                                <input
-                                                    type="radio"
-                                                    name="correct-answer"
-                                                    checked={a.isCorrect}
-                                                    onChange={() => setCorrectAnswer(i)}
-                                                    className="w-4 h-4 mt-10 text-green-600 shrink-0"
-                                                    title="Đáp án đúng"
+                            <div>
+                                <label className={labelCls}>4 đáp án (chọn đáp án đúng)</label>
+                                {/* Lưới 2x2 trên màn rộng, xếp dọc trên mobile */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {form.answers.map((a, i) => (
+                                        <div key={i} className="relative flex items-start gap-2">
+                                            <span className="w-6 mt-9 font-bold text-gray-500 dark:text-gray-400 shrink-0">
+                                                {String.fromCharCode(65 + i)}.
+                                            </span>
+                                            <div className="flex-1 min-w-0">
+                                                <MathEditor
+                                                    value={a.text}
+                                                    onChange={v => updateAnswer(i, v)}
+                                                    placeholder={`Đáp án ${String.fromCharCode(65 + i)}`}
+                                                    rows={1}
+                                                    variant="outlined"
+                                                    size="small"
+                                                    showPreview
                                                 />
-                                                <span className="w-6 mt-9 font-bold text-gray-500 dark:text-gray-400 shrink-0">
-                                                    {String.fromCharCode(65 + i)}.
-                                                </span>
-                                                <div className={`flex-1 min-w-0 rounded-lg ${a.isCorrect ? 'ring-2 ring-green-400 dark:ring-green-600 p-1' : ''}`}>
-                                                    <MathEditor
-                                                        value={a.text}
-                                                        onChange={v => updateAnswer(i, v)}
-                                                        placeholder={`Đáp án ${String.fromCharCode(65 + i)}`}
-                                                        rows={1}
-                                                        variant="outlined"
-                                                        size="small"
-                                                        showPreview
-                                                    />
-                                                </div>
                                             </div>
-                                        ))}
-                                    </div>
+                                            {/* Tích xanh góc trên phải: bấm để chọn đáp án đúng */}
+                                            <button
+                                                type="button"
+                                                onClick={() => setCorrectAnswer(i)}
+                                                title="Đánh dấu là đáp án đúng"
+                                                className={`absolute top-0 right-0 z-10 w-5 h-5 rounded-full flex items-center justify-center transition-colors ${a.isCorrect
+                                                    ? 'bg-green-500 text-white'
+                                                    : 'bg-gray-200 dark:bg-gray-600 text-transparent hover:bg-gray-300 dark:hover:bg-gray-500 hover:text-white/70'
+                                                    }`}
+                                            >
+                                                <Icon name="check" size={14} />
+                                            </button>
+                                        </div>
+                                    ))}
                                 </div>
-                                <div>
-                                    <label className={labelCls}>Ảnh minh họa (URL, không bắt buộc)</label>
-                                    <input
-                                        type="text"
-                                        className={inputCls}
-                                        placeholder="https://..."
-                                        value={form.questionImage || ''}
-                                        onChange={e => patch({ questionImage: e.target.value })}
-                                    />
-                                </div>
-                            </>
+                            </div>
                         )
                     )}
 
@@ -674,9 +721,20 @@ export default function QuestionFormModal({
                 {/* Footer */}
                 <div className="flex gap-3 justify-end px-6 py-4 border-t border-gray-200 dark:border-gray-700">
                     <Button variant="secondary" onClick={handleClose} disabled={saving}>
-                        Hủy
+                        {addedCount > 0 ? 'Xong' : 'Hủy'}
                     </Button>
-                    <Button icon="save" loading={saving} onClick={handleSave} disabled={saving || uploading}>
+                    {!isEdit && (
+                        <Button
+                            variant="secondary"
+                            icon="add"
+                            onClick={() => handleSave(true)}
+                            disabled={saving || uploading}
+                            title="Lưu câu này và tiếp tục soạn câu mới trong cùng modal"
+                        >
+                            Lưu & thêm câu tiếp
+                        </Button>
+                    )}
+                    <Button icon="save" loading={saving} onClick={() => handleSave(false)} disabled={saving || uploading}>
                         {saving
                             ? (hasPendingImage ? 'Đang tải ảnh lên...' : 'Đang lưu...')
                             : (isEdit ? 'Cập nhật' : 'Thêm vào kho')}
