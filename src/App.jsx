@@ -36,6 +36,8 @@ import Transfer from './pages/Transfer';
 import AdminPigGame from './pages/admin/AdminPigGame';
 import VersusGame from './pages/VersusGame';
 import AdminVersusGame from './pages/admin/AdminVersusGame';
+import Arena from './pages/Arena';
+import AdminArena from './pages/admin/AdminArena';
 
 function App() {
   return (
@@ -66,6 +68,7 @@ function App() {
                 <Route path="inventory" element={<Inventory />} />
                 <Route path="pig" element={<PigPet />} />
                 <Route path="versus" element={<VersusGame />} />
+                <Route path="arena" element={<Arena />} />
                 <Route path="transfer" element={<Transfer />} />
                 <Route path="exams" element={<Exams />} />
                 <Route path="exam/:examId" element={<ExamTaking />} />
@@ -97,6 +100,7 @@ function App() {
                 <Route path="store" element={<AdminStore />} />
                 <Route path="pig-game" element={<AdminPigGame />} />
                 <Route path="versus" element={<AdminVersusGame />} />
+                <Route path="arena" element={<AdminArena />} />
               </Route>
 
               {/* Catch all */}

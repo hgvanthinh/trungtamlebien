@@ -41,15 +41,22 @@ service cloud.firestore {
       // User có thể cập nhật một số field của chính mình (avatar, stats)
       // KHÔNG được đụng vào: role/email/classes/approved (định danh & phân quyền),
       // coins/gold (tiền — chỉ Cloud Function với Admin SDK mới được ghi),
-      // smashAttempts (lượt đập heo — chỉ admin chốt tuần mới cấp).
+      // smashAttempts (lượt đập heo — chỉ admin chốt tuần mới cấp),
+      // totalBehaviorPoints/arenaStats (điểm tích luỹ & hạn mức ngày của Đấu Trường —
+      //   chỉ admin hoặc Cloud Function claimArenaReward mới được ghi).
       //
       // LƯU Ý BẢO MẬT: mọi thay đổi số dư PHẢI đi qua Cloud Function.
       // Không được thêm bất kỳ rule nào cho phép client ghi coins/gold —
       // kể cả rule "chỉ cho tăng", vì client tự chọn được giá trị tăng
       // và có thể tự đặt số dư tuỳ ý cho chính mình.
+      // Điều này áp dụng y hệt cho totalBehaviorPoints: đây là điểm xếp hạng
+      // toàn trường, HS tự ghi được thì trần 100đ/ngày của Đấu Trường vô nghĩa.
+      // Các luồng cộng điểm hiện có (buổi dạy, quy đổi bài thi, sửa tay ở trang
+      // Học sinh / Vi phạm) đều chạy dưới tài khoản admin nên không bị ảnh hưởng.
       allow update: if isOwner(userId)
         && !request.resource.data.diff(resource.data).affectedKeys()
-             .hasAny(['role', 'email', 'classes', 'approved', 'coins', 'gold', 'smashAttempts']);
+             .hasAny(['role', 'email', 'classes', 'approved', 'coins', 'gold',
+                      'smashAttempts', 'totalBehaviorPoints', 'arenaStats']);
     }
 
     // Cho phép admin query toàn bộ collection users (cần cho hybrid model và admin operations)
@@ -303,6 +310,33 @@ service cloud.firestore {
     match /questionFolders/{folderId} {
       allow read: if isAdmin();
       allow write: if isAdmin();
+    }
+
+    // ===== Game Đấu Trường (Arena) — quiz nhiều người chơi =====
+    // Collection: arenaRooms (cấu hình phòng do admin tạo)
+    match /arenaRooms/{roomId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Collection: arenaSessions (đề + ĐÁP ÁN + bảng xếp hạng của từng trận)
+    //
+    // LƯU Ý BẢO MẬT: doc này CHỨA ĐÁP ÁN. Học sinh TUYỆT ĐỐI không được đọc —
+    // nếu không thì mở devtools là biết trước đáp án và luôn được điểm tối đa.
+    // HS chỉ thấy bản đề đã lược đáp án trên Realtime Database, và bảng xếp hạng
+    // được Cloud Function ghi ngược lại RTDB sau khi chấm xong.
+    // Chỉ Cloud Function (Admin SDK) ghi được.
+    match /arenaSessions/{sessionId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Collection: arenaRewardClaims (chốt mỗi người chỉ nhận thưởng 1 lần / trận)
+    // docId = {sessionId}_{uid} vì 1 trận có tới 5 người nhận thưởng.
+    match /arenaRewardClaims/{claimId} {
+      allow read: if isAdmin();
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow write: if false;
     }
 
     // Mặc định: Chặn tất cả truy cập khác

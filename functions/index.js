@@ -3,7 +3,15 @@ const admin = require("firebase-admin");
 const cors = require("cors")({ origin: true });
 
 // Initialize Firebase Admin
-admin.initializeApp();
+//
+// databaseURL phải khai báo TƯỜNG MINH: Realtime Database của dự án nằm ở
+// region asia-southeast1 nên URL không theo dạng mặc định
+// (https://<projectId>.firebaseio.com) mà FIREBASE_CONFIG có thể suy ra.
+// Thiếu dòng này thì admin.database() trong các function Đấu Trường sẽ trỏ
+// sang một database không tồn tại và đọc về rỗng — trận nào cũng 0 điểm.
+admin.initializeApp({
+    databaseURL: "https://toanthaybien-2c3d2-default-rtdb.asia-southeast1.firebasedatabase.app",
+});
 
 // Cấu hình region gần Việt Nam (Singapore)
 const REGION = "asia-southeast1";
@@ -996,5 +1004,556 @@ exports.awardExamXp = moneyFunction(async ({ uid: callerUid, body, db, email }) 
         });
 
         return { awarded: true, xpGained, newXp, newLevel, leveledUp };
+    });
+});
+
+// ============================================================================
+// ===== Game Đấu Trường (Arena) — quiz nhiều người chơi realtime =====
+// ============================================================================
+//
+// NGUYÊN TẮC BẢO MẬT XUYÊN SUỐT KHỐI NÀY:
+// Đáp án chỉ tồn tại ở Firestore `arenaSessions/{sessionId}` mà học sinh không
+// đọc được (firestore.rules: allow read if isAdmin()). Realtime Database chỉ
+// chứa bản đề ĐÃ LƯỢC ĐÁP ÁN. Vì vậy mọi việc cần biết đáp án — chấm điểm,
+// vật phẩm 50/50, vật phẩm gợi ý đúng-sai — đều phải chạy ở đây.
+//
+// Không bao giờ trả đáp án đầy đủ về client, kể cả trong thông báo lỗi.
+
+const DEFAULT_ARENA_SETTINGS = {
+    abcdCount: 3,
+    minPlayers: 5,
+    rewards: { 1: 50, 2: 40, 3: 30, 4: 20, 5: 20 },
+    dailyCapPoints: 100,
+    doubleAllowedTypes: ['abcd', 'short_answer'],
+};
+
+// Bậc thang điểm câu đúng-sai: index = số ý đúng (0..4) → tỉ lệ điểm.
+// Đúng 1 ý = 10%, 2 ý = 25%, 3 ý = 50%, đúng cả 4 ý = 100%.
+const ARENA_TF_RATIO = [0, 0.1, 0.25, 0.5, 1];
+
+const getArenaSettings = async (db) => {
+    const snap = await db.doc('settings/arenaGame').get();
+    const data = snap.exists ? snap.data() : {};
+    return {
+        ...DEFAULT_ARENA_SETTINGS,
+        ...data,
+        rewards: { ...DEFAULT_ARENA_SETTINGS.rewards, ...(data.rewards || {}) },
+    };
+};
+
+/** Chuẩn hoá đáp án điền: bỏ khoảng trắng thừa, không phân biệt hoa thường */
+const normalizeShortAnswer = (s) =>
+    String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+/**
+ * Chấm một câu hỏi. Trả về số điểm thô (chưa tính nhân đôi).
+ *
+ * Câu đúng-sai: ý KHÔNG trả lời phải tính là SAI. Dùng `?? null` để ý bỏ trống
+ * không bao giờ khớp với boolean isTrue.
+ */
+const gradeArenaQuestion = (q, ans) => {
+    if (!ans) return 0;
+    const points = Number(q.points) || 0;
+
+    if (q.type === 'true_false') {
+        const statements = q.statements || [];
+        const correct = statements.reduce(
+            (acc, st, i) => acc + ((ans.tf?.[i] ?? null) === !!st.isTrue ? 1 : 0),
+            0
+        );
+        const ratio = ARENA_TF_RATIO[correct] ?? 0;
+        return points * ratio;
+    }
+
+    if (q.type === 'short_answer') {
+        const given = normalizeShortAnswer(ans.text);
+        if (!given) return 0;
+        const pool = [q.correctAnswer, ...(q.alternativeAnswers || [])].map(normalizeShortAnswer);
+        return pool.includes(given) ? points : 0;
+    }
+
+    // abcd — KHONG dung Number(ans.choice): Number(null) === 0 se bien
+    // "khong tra loi" thanh "chon dap an A". Phai kiem tra kieu truoc.
+    const correctIdx = (q.answers || []).findIndex((a) => a.isCorrect);
+    if (correctIdx < 0) return 0;
+    if (typeof ans.choice !== 'number' || !Number.isInteger(ans.choice)) return 0;
+    return ans.choice === correctIdx ? points : 0;
+};
+
+/** Xáo mảng (Fisher-Yates) */
+const shuffleArena = (arr) => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+};
+
+/** Thời lượng (giây) của câu thứ `index` theo cơ cấu đề chuẩn */
+const arenaSecondsFor = (index, cfg) => {
+    const abcdCount = Number(cfg.abcdCount ?? 3);
+    if (index < abcdCount) return Number(cfg.abcdSeconds ?? 30);
+    if (index === abcdCount) return Number(cfg.tfSeconds ?? 210);
+    return Number(cfg.shortAnswerSeconds ?? 90);
+};
+
+/** Điểm tối đa của câu thứ `index` */
+const arenaPointsFor = (index, cfg) => {
+    const abcdCount = Number(cfg.abcdCount ?? 3);
+    if (index < abcdCount) return Number(cfg.abcdPoints ?? 0.5);
+    if (index === abcdCount) return Number(cfg.tfPoints ?? 2);
+    return Number(cfg.shortAnswerPoints ?? 1);
+};
+
+/**
+ * Chuyển câu hỏi kho đề sang định dạng arena (bản ĐẦY ĐỦ, còn đáp án).
+ * Luôn giữ field `type` (kể cả abcd) vì arena trộn nhiều dạng trong một mảng.
+ */
+const toArenaQuestionServer = (q, index, cfg) => {
+    const type = q.type || 'abcd';
+    const isImage = q.inputMode === 'image';
+    const base = {
+        type,
+        questionText: (q.questionText || '').trim() || (isImage ? 'Xem đề trong ảnh' : ''),
+        questionImage: q.questionImage || '',
+        points: arenaPointsFor(index, cfg),
+        seconds: arenaSecondsFor(index, cfg),
+    };
+
+    if (type === 'true_false') {
+        return {
+            ...base,
+            statements: (q.statements || []).map((st, i) => ({
+                text: (st.text || '').trim() || `Ý ${String.fromCharCode(97 + i)})`,
+                isTrue: !!st.isTrue,
+            })),
+        };
+    }
+    if (type === 'short_answer') {
+        return {
+            ...base,
+            correctAnswer: q.correctAnswer || '',
+            alternativeAnswers: q.alternativeAnswers || [],
+        };
+    }
+    // abcd — xáo đáp án để mỗi trận vị trí đáp án đúng khác nhau
+    return {
+        ...base,
+        answers: shuffleArena(
+            (q.answers || []).map((a, i) => ({
+                text: (a.text || '').trim() || String.fromCharCode(65 + i),
+                isCorrect: !!a.isCorrect,
+            }))
+        ),
+    };
+};
+
+/**
+ * Lược đáp án — bản DUY NHẤT được phép lên Realtime Database.
+ *
+ * Mọi thay đổi ở đây phải cực kỳ cẩn thận: sót một field đáp án là học sinh
+ * mở devtools đọc được và luôn đạt điểm tối đa.
+ */
+const stripArenaAnswers = (q) => {
+    const base = {
+        type: q.type,
+        questionText: q.questionText || '',
+        questionImage: q.questionImage || '',
+        points: q.points,
+        seconds: q.seconds,
+    };
+    if (q.type === 'true_false') {
+        return { ...base, statements: (q.statements || []).map((st) => ({ text: st.text })) };
+    }
+    if (q.type === 'short_answer') return base;
+    return { ...base, answers: (q.answers || []).map((a) => ({ text: a.text })) };
+};
+
+/**
+ * Chủ phòng bấm "Sẵn sàng" — tạo trận đấu.
+ *
+ * PHẢI chạy server-side vì hai lý do:
+ * 1. Kho câu hỏi (questionBank) chỉ admin đọc được, mà chủ phòng có thể là học sinh.
+ * 2. Doc arenaSessions chứa ĐÁP ÁN nên client không được phép ghi.
+ *
+ * Server tự xác minh người gọi đúng là chủ phòng và phòng đủ người.
+ *
+ * Client gửi: { roomId }
+ */
+exports.startArenaMatch = moneyFunction(async ({ uid, body, db }) => {
+    const { roomId } = body;
+    if (!roomId) throw new Error('Thiếu mã phòng');
+
+    const rtdb = admin.database();
+    const roomRef = rtdb.ref(`arena_lobbies/${roomId}`);
+    const roomSnap = await roomRef.get();
+    if (!roomSnap.exists()) throw new Error('Không tìm thấy phòng');
+
+    const room = roomSnap.val();
+    if (room.hostUid !== uid) throw new Error('Chỉ chủ phòng mới bắt đầu được trận');
+    if (room.status !== 'open') throw new Error('Trận đã bắt đầu rồi');
+
+    const cfg = await getArenaSettings(db);
+    const players = room.players || {};
+    const playerUids = Object.keys(players);
+    const minPlayers = Number(room.minPlayers || cfg.minPlayers || 5);
+    if (playerUids.length < minPlayers) {
+        throw new Error(`Cần ít nhất ${minPlayers} người mới bắt đầu được`);
+    }
+
+    // ===== Random đề theo cơ cấu: 3 ABCD + 1 đúng-sai + 1 điền =====
+    const folderId = room.folderId || null;
+    const bankSnap = await db.collection('questionBank').where('folderId', '==', folderId).get();
+
+    const byType = { abcd: [], true_false: [], short_answer: [] };
+    bankSnap.docs.forEach((d) => {
+        const q = d.data();
+        const type = q.type || 'abcd';
+        if (byType[type]) byType[type].push(q);
+    });
+
+    const abcdCount = Number(cfg.abcdCount ?? 3);
+    if (byType.abcd.length < abcdCount || byType.true_false.length < 1 || byType.short_answer.length < 1) {
+        throw new Error('Thư mục đề không đủ câu hỏi theo cơ cấu (3 trắc nghiệm + 1 đúng-sai + 1 điền đáp án)');
+    }
+
+    const picked = [
+        ...shuffleArena(byType.abcd).slice(0, abcdCount),
+        shuffleArena(byType.true_false)[0],
+        shuffleArena(byType.short_answer)[0],
+    ];
+    const questions = picked.map((q, i) => toArenaQuestionServer(q, i, cfg));
+
+    // ===== Ghi dữ liệu =====
+    const sessionId = rtdb.ref('arena_sessions').push().key;
+    const playerNames = {};
+    playerUids.forEach((pid) => {
+        playerNames[pid] = players[pid].name || '';
+    });
+
+    // 1. Firestore: đề ĐẦY ĐỦ + đáp án (học sinh không đọc được)
+    await db.doc(`arenaSessions/${sessionId}`).set({
+        roomId,
+        folderId,
+        teacherId: room.teacherId || null,
+        status: 'running',
+        playerCount: playerUids.length,
+        playerUids,
+        playerNames,
+        questions,
+        createdAt: nowStamp(),
+    });
+
+    // 2. RTDB: đề đã LƯỢC ĐÁP ÁN + đồng hồ.
+    // Dùng Date.now() của SERVER làm mốc — đây chính là thời gian mà
+    // /.info/serverTimeOffset của client được hiệu chỉnh theo.
+    const now = Date.now();
+    const countdownMs = Number(cfg.countdownSeconds ?? 5) * 1000;
+    const publicQuestions = {};
+    questions.forEach((q, i) => {
+        publicQuestions[i] = stripArenaAnswers(q);
+    });
+
+    await rtdb.ref(`arena_sessions/${sessionId}`).set({
+        meta: {
+            roomId,
+            status: 'running',
+            questionIndex: 0,
+            phase: 'question',
+            startedAt: now + countdownMs,
+            questionEndsAt: now + countdownMs + questions[0].seconds * 1000,
+            questionSeconds: questions[0].seconds,
+            phaseEndsAt: null,
+            totalQuestions: questions.length,
+            playerCount: playerUids.length,
+        },
+        questions: publicQuestions,
+    });
+
+    // 3. Đưa cả phòng vào trận (client đang nghe node phòng sẽ tự chuyển màn)
+    await roomRef.update({
+        status: 'running',
+        sessionId,
+        countdownEndsAt: now + countdownMs,
+        lastActivityAt: now,
+    });
+    try {
+        await rtdb.ref(`arena_open_rooms/${roomId}/status`).set('running');
+    } catch {
+        // phòng đã bị đóng, bỏ qua
+    }
+
+    return { sessionId, totalQuestions: questions.length };
+});
+
+/**
+ * Chấm điểm và xếp hạng cả trận Đấu Trường.
+ *
+ * Client gọi khi thấy trận chuyển sang trạng thái chấm điểm. Nhiều client cùng
+ * gọi là bình thường — lần đầu chấm và ghi kết quả, các lần sau trả về đúng
+ * bảng xếp hạng đã chốt (idempotent), nên không ai chấm lại ra kết quả khác.
+ *
+ * Client gửi: { sessionId }
+ */
+exports.finalizeArenaMatch = moneyFunction(async ({ uid, body, db }) => {
+    const { sessionId } = body;
+    if (!sessionId) throw new Error('Thiếu mã trận đấu');
+
+    const sessionRef = db.doc(`arenaSessions/${sessionId}`);
+    const sessionSnap = await sessionRef.get();
+    if (!sessionSnap.exists) throw new Error('Không tìm thấy trận đấu');
+
+    const session = sessionSnap.data();
+    if (!(session.playerUids || []).includes(uid)) {
+        throw new Error('Bạn không tham gia trận này');
+    }
+
+    // Đã chấm rồi thì trả luôn kết quả cũ, không chấm lại
+    if (session.ranking) return { ranking: session.ranking, alreadyGraded: true };
+
+    const rtdb = admin.database();
+    const sessionPath = `arena_sessions/${sessionId}`;
+    const [metaSnap, answersSnap, effectsSnap] = await Promise.all([
+        rtdb.ref(`${sessionPath}/meta`).get(),
+        rtdb.ref(`${sessionPath}/answers`).get(),
+        rtdb.ref(`${sessionPath}/effects`).get(),
+    ]);
+
+    const meta = metaSnap.val() || {};
+    // Chống chấm sớm: phải hết giờ câu cuối, hoặc trận đã chuyển sang chấm điểm
+    const finished = meta.status === 'grading' || meta.status === 'finished';
+    if (!finished && Date.now() < Number(meta.questionEndsAt || 0)) {
+        throw new Error('Trận đấu chưa kết thúc');
+    }
+
+    const answers = answersSnap.val() || {};
+    const effects = effectsSnap.val() || {};
+    const settings = await getArenaSettings(db);
+    const doubleAllowed = settings.doubleAllowedTypes || DEFAULT_ARENA_SETTINGS.doubleAllowedTypes;
+    const questions = session.questions || [];
+
+    const ranking = (session.playerUids || []).map((playerUid) => {
+        const playerAnswers = answers[playerUid] || {};
+        const playerEffects = effects[playerUid] || {};
+        let score = 0;
+        let totalMs = 0;
+
+        questions.forEach((q, i) => {
+            const ans = playerAnswers[i];
+            let pts = gradeArenaQuestion(q, ans);
+
+            // Nhân đôi: kiểm tra LẠI loại câu ở server — client ghi được ý định
+            // đặt cược lên câu bất kỳ, nhưng câu đúng-sai 2đ không được nhân.
+            if (
+                pts > 0 &&
+                typeof playerEffects.doubleOn === 'number' &&
+                playerEffects.doubleOn === i &&
+                doubleAllowed.includes(q.type)
+            ) {
+                pts *= 2;
+            }
+            score += pts;
+
+            // elapsedMs do client ghi nên có thể bị làm giả, phải kẹp trong
+            // khoảng hợp lệ; không trả lời thì tính trọn thời gian câu.
+            const maxMs = (Number(q.seconds) || 0) * 1000;
+            const raw = Number(ans?.elapsedMs);
+            totalMs += ans && Number.isFinite(raw) ? Math.min(Math.max(raw, 0), maxMs) : maxMs;
+        });
+
+        return {
+            uid: playerUid,
+            name: session.playerNames?.[playerUid] || '',
+            score: Math.round(score * 100) / 100,
+            totalMs,
+        };
+    });
+
+    // Điểm cao hơn trước; bằng điểm thì ai làm nhanh hơn xếp trên.
+    // uid là tiêu chí cuối để thứ tự luôn tất định — nếu thiếu, hai lần chấm
+    // có thể ra thứ hạng khác nhau và việc trao thưởng hết idempotent.
+    ranking.sort(
+        (a, b) => b.score - a.score || a.totalMs - b.totalMs || a.uid.localeCompare(b.uid)
+    );
+    ranking.forEach((r, i) => {
+        r.rank = i + 1;
+    });
+
+    await sessionRef.update({ ranking, status: 'finished', finalizedAt: nowStamp() });
+    await rtdb.ref(`${sessionPath}/results`).set({ ranking, gradedAt: Date.now() });
+    await rtdb.ref(`${sessionPath}/meta/status`).set('finished');
+
+    return { ranking };
+});
+
+/**
+ * Dùng vật phẩm cần biết đáp án: 50/50 và gợi ý câu đúng-sai.
+ *
+ * Phải chạy server-side vì Realtime Database không có đáp án. Server tự đánh
+ * dấu đã dùng trong cùng lượt gọi nên không thể dùng lại vật phẩm.
+ *
+ * Client gửi: { sessionId, qIndex, effect: 'fifty'|'hint_tf', statementIndex? }
+ */
+exports.useArenaHint = moneyFunction(async ({ uid, body, db }) => {
+    const { sessionId, qIndex, effect, statementIndex } = body;
+    if (!sessionId) throw new Error('Thiếu mã trận đấu');
+    if (effect !== 'fifty' && effect !== 'hint_tf') throw new Error('Vật phẩm không hợp lệ');
+
+    const index = Number(qIndex);
+    if (!Number.isInteger(index) || index < 0) throw new Error('Câu hỏi không hợp lệ');
+
+    const sessionSnap = await db.doc(`arenaSessions/${sessionId}`).get();
+    if (!sessionSnap.exists) throw new Error('Không tìm thấy trận đấu');
+
+    const session = sessionSnap.data();
+    if (!(session.playerUids || []).includes(uid)) throw new Error('Bạn không tham gia trận này');
+
+    const question = (session.questions || [])[index];
+    if (!question) throw new Error('Không tìm thấy câu hỏi');
+
+    const rtdb = admin.database();
+    const sessionPath = `arena_sessions/${sessionId}`;
+
+    // Chỉ cho dùng ở đúng câu đang diễn ra, tránh soi trước đáp án câu sau
+    const metaSnap = await rtdb.ref(`${sessionPath}/meta`).get();
+    const meta = metaSnap.val() || {};
+    if (meta.status !== 'running') throw new Error('Trận đấu không trong lúc thi đấu');
+    if (Number(meta.questionIndex) !== index) throw new Error('Chỉ dùng được cho câu đang làm');
+
+    // Đã trả lời câu này rồi thì dùng vật phẩm không còn ý nghĩa
+    const answeredSnap = await rtdb.ref(`${sessionPath}/answers/${uid}/${index}`).get();
+    if (answeredSnap.exists()) throw new Error('Bạn đã trả lời câu này rồi');
+
+    // Chốt quyền dùng bằng transaction TRƯỚC khi tính kết quả, hai request
+    // song song thì chỉ một cái qua được.
+    const usedRef = rtdb.ref(`${sessionPath}/effects/${uid}/used/${effect}`);
+    const claim = await usedRef.transaction((current) => (current ? undefined : true));
+    if (!claim.committed) throw new Error('Bạn đã dùng vật phẩm này trong trận rồi');
+
+    try {
+        if (effect === 'fifty') {
+            if (question.type !== 'abcd') throw new Error('Vật phẩm 50/50 chỉ dùng cho câu 4 đáp án');
+
+            const wrongIndices = (question.answers || [])
+                .map((a, i) => (a.isCorrect ? -1 : i))
+                .filter((i) => i >= 0);
+            // Bỏ 2 đáp án sai ngẫu nhiên
+            for (let i = wrongIndices.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [wrongIndices[i], wrongIndices[j]] = [wrongIndices[j], wrongIndices[i]];
+            }
+            const removed = wrongIndices.slice(0, 2);
+
+            await rtdb.ref(`${sessionPath}/effects/${uid}/fifty/${index}`).set(removed);
+            return { effect, removed };
+        }
+
+        // hint_tf
+        if (question.type !== 'true_false') {
+            throw new Error('Vật phẩm gợi ý chỉ dùng cho câu đúng-sai');
+        }
+        const sIndex = Number(statementIndex);
+        const statements = question.statements || [];
+        if (!Number.isInteger(sIndex) || sIndex < 0 || sIndex >= statements.length) {
+            throw new Error('Ý cần gợi ý không hợp lệ');
+        }
+
+        const hint = { index: sIndex, isTrue: !!statements[sIndex].isTrue };
+        await rtdb.ref(`${sessionPath}/effects/${uid}/hintTf/${index}`).set(hint);
+        return { effect, ...hint };
+    } catch (error) {
+        // Trả lại lượt dùng nếu không tạo được gợi ý (sai loại câu, ý không hợp lệ)
+        await usedRef.remove().catch(() => {});
+        throw error;
+    }
+});
+
+/**
+ * Nhận điểm tích luỹ sau trận Đấu Trường.
+ *
+ * Server tự đọc bảng xếp hạng đã chốt để xác minh thứ hạng, không tin thứ hạng
+ * client gửi lên. Trần điểm mỗi ngày dùng cùng mẫu với giới hạn chuyển Xu:
+ * lưu { dateKey, points } trên user doc, sang ngày mới tự reset.
+ *
+ * Client gửi: { sessionId }
+ */
+exports.claimArenaReward = moneyFunction(async ({ uid, body, db }) => {
+    const { sessionId } = body;
+    if (!sessionId) throw new Error('Thiếu mã trận đấu');
+
+    const settings = await getArenaSettings(db);
+    const rewards = settings.rewards;
+    const cap = Number(settings.dailyCapPoints ?? 100);
+
+    const sessionSnap = await db.doc(`arenaSessions/${sessionId}`).get();
+    if (!sessionSnap.exists) throw new Error('Không tìm thấy trận đấu');
+
+    const session = sessionSnap.data();
+    if (!session.ranking) throw new Error('Trận đấu chưa chấm điểm xong');
+
+    // Đủ số người lúc BẮT ĐẦU là đủ điều kiện, người rời giữa chừng không làm
+    // mất thưởng của những người ở lại.
+    const minPlayers = Number(settings.minPlayers ?? 5);
+    if (Number(session.playerCount || 0) < minPlayers) {
+        return { awarded: false, reason: 'not_enough_players', points: 0, minPlayers };
+    }
+
+    const me = session.ranking.find((r) => r.uid === uid);
+    if (!me) throw new Error('Bạn không tham gia trận này');
+    if (me.rank > 5) return { awarded: false, reason: 'out_of_top5', points: 0, rank: me.rank };
+    // Chặn cày điểm bằng tài khoản phụ vào ngồi im
+    if (!(Number(me.score) > 0)) return { awarded: false, reason: 'zero_score', points: 0 };
+
+    const base = Number(rewards[me.rank] || rewards[String(me.rank)] || 0);
+    if (base <= 0) return { awarded: false, reason: 'no_reward_configured', points: 0 };
+
+    // docId gộp uid vì một trận có tới 5 người nhận thưởng
+    const claimRef = db.doc(`arenaRewardClaims/${sessionId}_${uid}`);
+    const userRef = db.doc(`users/${uid}`);
+    const dateKey = getDateKeyVN();
+
+    return await db.runTransaction(async (t) => {
+        const claimDoc = await t.get(claimRef);
+        if (claimDoc.exists) throw new Error('Trận này bạn đã nhận thưởng rồi');
+
+        const userDoc = await t.get(userRef);
+        if (!userDoc.exists) throw new Error('Không tìm thấy thông tin người dùng');
+        const user = userDoc.data();
+
+        const stats = user.arenaStats || {};
+        const usedToday = stats.dateKey === dateKey ? Number(stats.points) || 0 : 0;
+        // Gần chạm trần thì vẫn trao phần còn lại, không từ chối cả phần thưởng
+        const granted = Math.min(base, Math.max(0, cap - usedToday));
+
+        if (granted <= 0) {
+            // Vẫn ghi claim để lần sau không thử lại vô ích
+            t.set(claimRef, {
+                sessionId, uid, rank: me.rank, points: 0,
+                reason: 'daily_cap', dateKey, createdAt: nowStamp(),
+            });
+            return { awarded: false, reason: 'daily_cap', points: 0, usedToday, cap };
+        }
+
+        const newTotal = (Number(user.totalBehaviorPoints) || 0) + granted;
+        t.update(userRef, {
+            totalBehaviorPoints: newTotal,
+            arenaStats: { dateKey, points: usedToday + granted },
+            updatedAt: nowStamp(),
+        });
+        t.set(claimRef, {
+            sessionId, uid, rank: me.rank, points: granted,
+            capped: granted < base, dateKey, createdAt: nowStamp(),
+        });
+
+        return {
+            awarded: true,
+            points: granted,
+            rank: me.rank,
+            capped: granted < base,
+            newTotal,
+            usedToday: usedToday + granted,
+            cap,
+        };
     });
 });

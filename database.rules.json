@@ -5,6 +5,80 @@
     "versus_open_lobbies": { ".read": "auth != null", ".write": "auth != null" },
     "versus_active_lobby": { ".read": "auth != null", ".write": "auth != null" },
     "versus_lobbies": { ".read": "auth != null", ".write": "auth != null" },
-    "versus_sessions": { ".read": "auth != null", ".write": "auth != null" }
+    "versus_sessions": { ".read": "auth != null", ".write": "auth != null" },
+
+    "arena_open_rooms": { ".read": "auth != null", ".write": "auth != null" },
+    "arena_active_rooms": { ".read": "auth != null", ".write": "auth != null" },
+
+    "arena_lobbies": {
+      ".read": "auth != null",
+      "$roomId": {
+        ".read": "auth != null",
+
+        "players": {
+          "$uid": { ".write": "auth.uid == $uid" }
+        },
+
+        "playerCount": { ".write": "auth != null" },
+
+        "hostUid": { ".write": "auth != null" },
+        "hostMode": { ".write": "auth != null" },
+        "lastActivityAt": { ".write": "auth != null" },
+
+        "status": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "sessionId": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "countdownEndsAt": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "teacherId": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "title": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "folderId": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "folderName": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "grade": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "minPlayers": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "maxPlayers": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "allowStudentHost": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "openedAt": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+
+        ".write": "auth.token.email == 'admin@thaybien.com'"
+      }
+    },
+
+    "arena_sessions": {
+      ".read": "auth != null",
+      "$sessionId": {
+        ".read": "auth != null",
+
+        "meta": {
+          ".write": "auth != null"
+        },
+
+        "questions": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+        "results": { ".write": "auth.token.email == 'admin@thaybien.com'" },
+
+        "presence": {
+          "$uid": { ".write": "auth.uid == $uid" }
+        },
+
+        "answers": {
+          "$uid": {
+            ".write": "auth.uid == $uid",
+            "$qIndex": { ".validate": "!data.exists()" }
+          }
+        },
+
+        "effects": {
+          "$uid": {
+            "used": { ".write": "auth.uid == $uid" },
+            "doubleOn": { ".write": "auth.uid == $uid" },
+            "frozenUntil": { ".write": "auth != null" },
+            "frozenBy": { ".write": "auth != null" },
+            "fifty": { ".write": false },
+            "hintTf": { ".write": false },
+            ".write": "auth.token.email == 'admin@thaybien.com'"
+          }
+        },
+
+        ".write": "auth.token.email == 'admin@thaybien.com'"
+      }
+    }
   }
 }

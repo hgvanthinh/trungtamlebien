@@ -11,6 +11,7 @@ import {
 } from '../../services/storeService';
 import { compressStoreImage } from '../../services/fileProcessingService';
 import { VERSUS_ITEM_EFFECTS } from '../../services/versusItemService';
+import { ARENA_ITEM_EFFECTS, ARENA_ITEM_CATEGORY } from '../../services/arenaItemService';
 import CoinIcon from '../../components/common/CoinIcon';
 import GoldIcon from '../../components/common/GoldIcon';
 import Toast from '../../components/common/Toast';
@@ -20,6 +21,15 @@ const CATEGORY_EMOJIS = [
     '🖼️', '🌽', '🍎', '🍬', '🧸', '🎮', '🎵', '📚',
     '⚽', '🎯', '💎', '🔥', '🌟', '🏆', '🎈', '🧩'
 ];
+
+// Category có field `effect`. Viền avatar dùng cho Đấu Trường, versus-item cho Đấu Trí 1v1.
+// Mỗi category tra bảng effect riêng — không dùng chung danh sách.
+const EFFECT_OPTIONS_BY_CATEGORY = {
+    'versus-item': { label: '⚔️ Hiệu ứng Đấu Trí', effects: VERSUS_ITEM_EFFECTS, required: true,
+        hint: 'Vật phẩm dùng trong trận Đấu Trí 1v1. HS mua ở Cửa Hàng, dùng 1 lần rồi mất.' },
+    [ARENA_ITEM_CATEGORY]: { label: '🏟️ Hiệu ứng Đấu Trường', effects: ARENA_ITEM_EFFECTS, required: false,
+        hint: 'Để trống nếu viền chỉ để trang trí. Nếu gán hiệu ứng, HS sở hữu viền sẽ được dùng skill này 1 lần mỗi trận Đấu Trường (viền KHÔNG bị mất).' }
+};
 
 export default function AdminStore() {
     const [items, setItems] = useState([]);
@@ -42,7 +52,7 @@ export default function AdminStore() {
         purchaseType: 'online', // 'online' or 'offline'
         discontinued: false, // true = ngưng bán
         imageUrl: '',
-        effect: '' // chỉ dùng cho category 'versus-item'
+        effect: '' // chỉ dùng cho category trong EFFECT_OPTIONS_BY_CATEGORY
     });
     const [imageFile, setImageFile] = useState(null);
     const [imagePreview, setImagePreview] = useState('');
@@ -143,7 +153,8 @@ export default function AdminStore() {
             return;
         }
 
-        if (formData.category === 'versus-item' && !formData.effect) {
+        const effectConfig = EFFECT_OPTIONS_BY_CATEGORY[formData.category];
+        if (effectConfig?.required && !formData.effect) {
             setToast({ type: 'error', message: 'Vui lòng chọn Hiệu ứng Đấu Trí cho vật phẩm' });
             return;
         }
@@ -169,8 +180,9 @@ export default function AdminStore() {
                 ...formData,
                 imageUrl,
                 price: Number(formData.price),
-                // effect chỉ có nghĩa với vật phẩm Đấu Trí
-                effect: formData.category === 'versus-item' ? formData.effect : ''
+                // effect chỉ có nghĩa với category có hiệu ứng (versus-item, avatar-border).
+                // Category khác thì xoá để không sót effect cũ khi admin đổi category.
+                effect: effectConfig ? formData.effect : ''
             };
 
             if (editingItem) {
@@ -540,11 +552,12 @@ export default function AdminStore() {
                                     </div>
                                 </div>
 
-                                {/* Hiệu ứng Đấu Trí — chỉ hiện với vật phẩm versus-item */}
-                                {formData.category === 'versus-item' && (
+                                {/* Hiệu ứng — hiện với versus-item (Đấu Trí) và avatar-border (Đấu Trường) */}
+                                {EFFECT_OPTIONS_BY_CATEGORY[formData.category] && (
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                                            ⚔️ Hiệu ứng Đấu Trí *
+                                            {EFFECT_OPTIONS_BY_CATEGORY[formData.category].label}
+                                            {EFFECT_OPTIONS_BY_CATEGORY[formData.category].required ? ' *' : ''}
                                         </label>
                                         <select
                                             value={formData.effect}
@@ -553,15 +566,19 @@ export default function AdminStore() {
                       bg-white dark:bg-gray-700 text-gray-900 dark:text-white
                       focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                         >
-                                            <option value="">-- Chọn hiệu ứng --</option>
-                                            {Object.entries(VERSUS_ITEM_EFFECTS).map(([key, eff]) => (
+                                            <option value="">
+                                                {EFFECT_OPTIONS_BY_CATEGORY[formData.category].required
+                                                    ? '-- Chọn hiệu ứng --'
+                                                    : '-- Không có hiệu ứng (chỉ trang trí) --'}
+                                            </option>
+                                            {Object.entries(EFFECT_OPTIONS_BY_CATEGORY[formData.category].effects).map(([key, eff]) => (
                                                 <option key={key} value={key}>
                                                     {eff.label} — {eff.description}
                                                 </option>
                                             ))}
                                         </select>
                                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                            Vật phẩm dùng trong trận Đấu Trí 1v1. HS mua ở Cửa Hàng và kích hoạt khi thi đấu.
+                                            {EFFECT_OPTIONS_BY_CATEGORY[formData.category].hint}
                                         </p>
                                     </div>
                                 )}
