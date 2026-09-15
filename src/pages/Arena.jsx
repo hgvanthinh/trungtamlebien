@@ -180,7 +180,6 @@ export default function Arena() {
                 <ArenaResult
                     sessionId={sessionId}
                     myUid={uid}
-                    players={room?.players || playersSnapshotRef.current}
                     onExit={handleExitResult}
                     onToast={setToast}
                 />

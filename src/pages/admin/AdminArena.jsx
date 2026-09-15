@@ -19,7 +19,6 @@ import { ARENA_ITEM_EFFECTS } from '../../services/arenaItemService';
 import Button from '../../components/common/Button';
 import Icon from '../../components/common/Icon';
 import Toast from '../../components/common/Toast';
-import Avatar from '../../components/common/Avatar';
 import { useConfirm } from '../../hooks/useConfirm';
 
 const inputCls =
@@ -540,7 +539,6 @@ function ArenaSpectator({ roomId, onToast }) {
                             p.online === false ? 'opacity-50' : ''
                         }`}
                     >
-                        <Avatar src={p.avatar} name={p.name} borderUrl={p.borderUrl} size="xs" lazy={false} />
                         <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
                             {p.name}
                         </span>

@@ -21,8 +21,14 @@
 
         "playerCount": { ".write": "auth != null" },
 
-        "hostUid": { ".write": "auth != null" },
-        "hostMode": { ".write": "auth != null" },
+        "hostUid": {
+          ".write": "auth != null && data.parent().child('allowStudentHost').val() == true && data.parent().child('status').val() == 'open'",
+          ".validate": "newData.val() == auth.uid || newData.val() == data.parent().child('teacherId').val()"
+        },
+        "hostMode": {
+          ".write": "auth != null && data.parent().child('allowStudentHost').val() == true && data.parent().child('status').val() == 'open'",
+          ".validate": "newData.val() == 'student' || newData.val() == 'admin'"
+        },
         "lastActivityAt": { ".write": "auth != null" },
 
         "status": { ".write": "auth.token.email == 'admin@thaybien.com'" },

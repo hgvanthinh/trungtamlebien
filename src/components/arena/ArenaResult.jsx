@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Icon from '../common/Icon';
 import Button from '../common/Button';
-import Avatar from '../common/Avatar';
 import { listenToArenaResults } from '../../services/arenaSessionService';
 import { finalizeArenaMatch, claimArenaReward } from '../../services/arenaRewardService';
 
@@ -34,7 +33,7 @@ const CLAIM_MESSAGES = {
     no_reward_configured: 'Trận này chưa cấu hình phần thưởng.',
 };
 
-export default function ArenaResult({ sessionId, myUid, players = {}, onExit, onToast }) {
+export default function ArenaResult({ sessionId, myUid, onExit, onToast }) {
     const [ranking, setRanking] = useState(null);
     const [grading, setGrading] = useState(true);
     const [gradeError, setGradeError] = useState(null);
@@ -191,7 +190,6 @@ export default function ArenaResult({ sessionId, myUid, players = {}, onExit, on
                 <div className="space-y-1.5">
                     {list.map((r) => {
                         const style = RANK_STYLES[r.rank];
-                        const player = players[r.uid] || {};
                         const isMe = r.uid === myUid;
 
                         return (
@@ -204,13 +202,6 @@ export default function ArenaResult({ sessionId, myUid, players = {}, onExit, on
                                 <span className="shrink-0 w-8 text-center font-black text-[#111812] dark:text-white">
                                     {style?.medal || r.rank}
                                 </span>
-                                <Avatar
-                                    src={player.avatar}
-                                    name={r.name}
-                                    borderUrl={player.borderUrl}
-                                    size="sm"
-                                    lazy={false}
-                                />
                                 <div className="flex-1 min-w-0">
                                     <p className="font-bold text-[#111812] dark:text-white truncate">
                                         {r.name || 'Học sinh'}

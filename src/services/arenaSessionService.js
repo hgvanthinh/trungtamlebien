@@ -323,6 +323,9 @@ async function reassignHostIfNeeded(roomId, leavingUid) {
     if (!room || room.hostUid !== leavingUid) return;
     // Phòng do admin làm chủ thì admin vẫn giữ quyền dù không có mặt trong players
     if (room.hostMode === 'admin') return;
+    // Rules chỉ cho đổi chủ phòng khi phòng còn đang chờ; trận đã chạy thì
+    // chủ phòng không còn vai trò gì nữa nên cũng không cần chuyển.
+    if (room.status !== 'open') return;
 
     const candidates = Object.entries(room.players || {})
         .filter(([id]) => id !== leavingUid)
@@ -331,11 +334,12 @@ async function reassignHostIfNeeded(roomId, leavingUid) {
     const hostRef = ref(realtimeDb, `${ROOMS_PATH}/${roomId}/hostUid`);
 
     if (candidates.length === 0) {
-        // Không còn ai → trả quyền về cho giáo viên
+        // Không còn ai → trả quyền về cho giáo viên.
+        // Giữ nguyên hostMode='student' để phòng vẫn cho HS kế tiếp giành quyền
+        // (đổi về 'admin' sẽ khoá luôn cơ chế uỷ quyền của phòng này).
         await runTransaction(hostRef, (current) =>
             current === leavingUid ? room.teacherId : undefined
         );
-        await set(ref(realtimeDb, `${ROOMS_PATH}/${roomId}/hostMode`), 'admin').catch(() => {});
         return;
     }
 

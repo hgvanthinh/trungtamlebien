@@ -1,4 +1,3 @@
-import Avatar from '../common/Avatar';
 import Icon from '../common/Icon';
 
 /**
@@ -36,27 +35,22 @@ export default function ArenaLiveBoard({ players = {}, answers = {}, questionInd
                 </span>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
                 {list.map((p) => (
-                    <div
+                    <span
                         key={p.uid}
                         title={`${p.name}${p.answered ? ' — đã trả lời' : ''}`}
-                        className={`relative shrink-0 transition-opacity ${p.online === false ? 'opacity-40' : ''}`}
+                        className={`flex items-center gap-1 max-w-[140px] px-2 py-1 rounded-full text-xs font-bold transition-colors
+                            ${p.answered
+                                ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-300'
+                                : 'bg-[#f0f5f1] dark:bg-white/5 text-[#556958] dark:text-[#a5b5a8]'
+                            }
+                            ${p.uid === myUid ? 'ring-1 ring-primary' : ''}
+                            ${p.online === false ? 'opacity-40' : ''}`}
                     >
-                        <Avatar
-                            src={p.avatar}
-                            name={p.name}
-                            borderUrl={p.borderUrl}
-                            size="sm"
-                            lazy={false}
-                            className={p.uid === myUid ? 'ring-2 ring-primary ring-offset-1' : ''}
-                        />
-                        {p.answered && (
-                            <span className="absolute -bottom-0.5 -right-0.5 size-4 rounded-full bg-green-500 border-2 border-white dark:border-surface-dark flex items-center justify-center">
-                                <Icon name="check" size={10} className="text-white" />
-                            </span>
-                        )}
-                    </div>
+                        {p.answered && <Icon name="check" size={12} className="shrink-0" />}
+                        <span className="truncate">{p.name}</span>
+                    </span>
                 ))}
             </div>
         </div>

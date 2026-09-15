@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import Icon from '../common/Icon';
-import Avatar from '../common/Avatar';
 import { ARENA_ITEM_EFFECTS, isEffectUsableForType } from '../../services/arenaItemService';
 
 /**
@@ -196,13 +195,7 @@ export default function ArenaItemBar({
                                     }}
                                     className="w-full flex items-center gap-3 p-2.5 rounded-2xl bg-[#f0f5f1] dark:bg-white/5 hover:bg-sky-100 dark:hover:bg-sky-500/20 transition-colors"
                                 >
-                                    <Avatar
-                                        src={p.avatar}
-                                        name={p.name}
-                                        borderUrl={p.borderUrl}
-                                        size="sm"
-                                        lazy={false}
-                                    />
+                                    <Icon name="person" size={20} className="shrink-0 text-[#556958] dark:text-[#a5b5a8]" />
                                     <span className="flex-1 text-left font-bold text-[#111812] dark:text-white truncate">
                                         {p.name}
                                     </span>

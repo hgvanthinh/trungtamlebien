@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import Icon from '../common/Icon';
 import Button from '../common/Button';
-import Avatar from '../common/Avatar';
 import { ARENA_ITEM_EFFECTS } from '../../services/arenaItemService';
 import { getArenaItems } from '../../services/arenaItemService';
 import { startArenaMatch } from '../../services/arenaRewardService';
@@ -126,20 +125,16 @@ export default function ArenaLobby({ roomId, room, myUid, onLeave, onToast }) {
                 </div>
 
                 <div className="space-y-1.5">
-                    {playerList.map((p) => (
+                    {playerList.map((p, idx) => (
                         <div
                             key={p.uid}
                             className={`flex items-center gap-3 p-2 rounded-2xl ${
                                 p.uid === myUid ? 'bg-primary/10' : 'bg-[#f0f5f1] dark:bg-white/5'
                             } ${p.online === false ? 'opacity-50' : ''}`}
                         >
-                            <Avatar
-                                src={p.avatar}
-                                name={p.name}
-                                borderUrl={p.borderUrl}
-                                size="sm"
-                                lazy={false}
-                            />
+                            <span className="shrink-0 size-7 rounded-full bg-white dark:bg-white/10 flex items-center justify-center text-xs font-extrabold text-[#556958] dark:text-[#a5b5a8]">
+                                {idx + 1}
+                            </span>
                             <span className="flex-1 min-w-0 font-bold text-[#111812] dark:text-white truncate">
                                 {p.name}
                                 {p.uid === myUid && (
