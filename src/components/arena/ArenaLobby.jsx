@@ -4,6 +4,7 @@ import Button from '../common/Button';
 import { ARENA_ITEM_EFFECTS } from '../../services/arenaItemService';
 import { getArenaItems } from '../../services/arenaItemService';
 import { startArenaMatch } from '../../services/arenaRewardService';
+import { DEFAULT_ARENA_SETTINGS, formatSeconds } from '../../services/arenaSettingsService';
 
 /**
  * Phòng chờ Đấu Trường.
@@ -12,7 +13,8 @@ import { startArenaMatch } from '../../services/arenaRewardService';
  * để đưa cả phòng vào trận. Nút chỉ bật khi đủ số người tối thiểu.
  */
 
-export default function ArenaLobby({ roomId, room, myUid, onLeave, onToast }) {
+export default function ArenaLobby({ roomId, room, myUid, settings, onLeave, onToast }) {
+    const cfg = settings || DEFAULT_ARENA_SETTINGS;
     const [starting, setStarting] = useState(false);
     const [myItems, setMyItems] = useState({});
 
@@ -72,12 +74,23 @@ export default function ArenaLobby({ roomId, room, myUid, onLeave, onToast }) {
                 {/* Thể lệ ngắn */}
                 <div className="mt-3 p-3 rounded-2xl bg-[#f0f5f1] dark:bg-white/5 text-xs text-[#556958] dark:text-[#a5b5a8] space-y-1">
                     <p className="font-bold text-[#111812] dark:text-white">Thể lệ</p>
-                    <p>· 3 câu trắc nghiệm (0,5đ — 30 giây/câu)</p>
-                    <p>· 1 câu đúng-sai 4 ý (2đ — 3,5 phút)</p>
-                    <p>· 1 câu điền đáp án (1đ)</p>
+                    <p>
+                        · {cfg.abcdCount} câu trắc nghiệm ({cfg.abcdPoints}đ —{' '}
+                        {formatSeconds(cfg.abcdSeconds)}/câu)
+                    </p>
+                    <p>
+                        · 1 câu đúng-sai 4 ý ({cfg.tfPoints}đ — {formatSeconds(cfg.tfSeconds)})
+                    </p>
+                    <p>
+                        · 1 câu điền đáp án ({cfg.shortAnswerPoints}đ —{' '}
+                        {formatSeconds(cfg.shortAnswerSeconds)})
+                    </p>
+                    <p>· Đáp án đã nộp vẫn sửa được tới khi hết giờ câu đó</p>
+                    <p>· Cả phòng trả lời xong thì qua câu luôn, khỏi chờ hết giờ</p>
                     <p>· Bằng điểm thì ai làm nhanh hơn xếp trên</p>
                     <p className="text-primary-dark dark:text-primary font-bold pt-0.5">
-                        Top 5 nhận 50/40/30/20/20 điểm tích luỹ
+                        Top 5 nhận{' '}
+                        {[1, 2, 3, 4, 5].map((r) => cfg.rewards?.[r] ?? 0).join('/')} điểm tích luỹ
                     </p>
                 </div>
             </div>

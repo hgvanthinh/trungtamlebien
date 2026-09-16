@@ -3,8 +3,10 @@ import Icon from '../common/Icon';
 import Button from '../common/Button';
 import { MathText } from '../math';
 import ArenaItemBar from './ArenaItemBar';
+import ArenaDisplaySettings from './ArenaDisplaySettings';
 import ArenaLiveBoard from './ArenaLiveBoard';
 import { useArenaPhase } from '../../hooks/useArenaPhase';
+import { useArenaDisplayPrefs } from '../../hooks/useArenaDisplayPrefs';
 import {
     getArenaQuestions,
     listenToArenaEffects,
@@ -14,6 +16,7 @@ import {
     burnIce,
     setDoubleBet,
     trackArenaPresence,
+    endQuestionEarly,
 } from '../../services/arenaSessionService';
 import { getArenaItems } from '../../services/arenaItemService';
 import { requestArenaHint } from '../../services/arenaRewardService';
@@ -27,13 +30,20 @@ const STATEMENT_LABELS = ['a', 'b', 'c', 'd'];
  * KHÔNG CHẤM ĐIỂM Ở ĐÂY. Client không có đáp án — chỉ ghi lựa chọn thô lên RTDB,
  * Cloud Function chấm và công bố cuối trận. Vì vậy sau khi nộp, HS chỉ thấy
  * "đã ghi nhận", không thấy đúng/sai.
+ *
+ * SỬA ĐÁP ÁN: nộp rồi vẫn đổi được tới khi hết giờ câu đó. Bản ghi sau đè lên
+ * bản trước, và `elapsedMs` tính lại theo lần nộp cuối — đổi ý thì mất lợi thế
+ * tốc độ khi so kè điểm bằng nhau.
  */
-export default function ArenaMatch({ sessionId, settings, room, onFinished, onToast }) {
+export default function ArenaMatch({ sessionId, settings, room, mode = 'live', onFinished, onToast }) {
     const uid = room?.myUid;
+    // Luyện tập một mình: không đối thủ nên bỏ hết vật phẩm và bảng theo dõi.
+    const isPractice = mode === 'practice';
     const [questions, setQuestions] = useState([]);
     const questionsRef = useRef([]);
     const [effects, setEffects] = useState({});
     const [answers, setAnswers] = useState({});
+    const answersRef = useRef({});
     const [ownedItems, setOwnedItems] = useState({});
     const [itemBusy, setItemBusy] = useState(null);
 
@@ -44,12 +54,22 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
 
     const [now, setNow] = useState(Date.now());
 
+    // Cỡ chữ / cỡ ảnh do HS tự chỉnh, nhớ theo từng máy
+    const { prefs, setFontScale, setImageMaxHeight, reset: resetPrefs } = useArenaDisplayPrefs();
+
     // Giữ bản mới nhất của bài đang soạn để hàm tự-nộp (chạy trong interval)
     // luôn đọc được giá trị hiện tại, không bị kẹt ở closure cũ.
     const draftRef = useRef({ choice: null, tf: {}, text: '' });
     draftRef.current = { choice, tf: tfAnswers, text: shortText };
 
+    // Bài đang soạn có khác bản đã nộp không — dùng để biết còn gì cần gửi.
+    const isDraftDirtyRef = useRef(false);
+
+    // Chỉ dùng để tránh tự-nộp trùng lúc hết giờ — KHÔNG dùng để khoá nút,
+    // vì HS được phép nộp lại nhiều lần trong cùng một câu.
     const submittedRef = useRef({});
+    const [submitting, setSubmitting] = useState(false);
+    const [skipping, setSkipping] = useState(false);
 
     // doSubmit duoc gan lai moi lan render (ben duoi) de luon doc duoc
     // questionStart / serverNow moi nhat. Dung ref vi handleAutoSubmit chay
@@ -71,6 +91,9 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                 (q.type === 'true_false' && Object.keys(draft.tf).length > 0) ||
                 (q.type === 'short_answer' && draft.text.trim());
             if (!hasAnswer) return;
+            // Bản nháp trùng với bản đã nộp → không ghi lại, tránh đội elapsedMs
+            // lên sát hết giờ cho người không hề đổi ý.
+            if (!isDraftDirtyRef.current) return;
 
             submittedRef.current[qIndex] = true;
             try {
@@ -123,7 +146,10 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
 
     useEffect(() => {
         if (!sessionId) return undefined;
-        return listenToArenaAnswers(sessionId, setAnswers);
+        return listenToArenaAnswers(sessionId, (data) => {
+            answersRef.current = data;
+            setAnswers(data);
+        });
     }, [sessionId]);
 
     useEffect(() => {
@@ -138,16 +164,49 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
     }, [serverNow]);
 
     // ===== Reset bài soạn khi sang câu mới =====
+    // Nạp lại từ bản đã nộp (nếu có) thay vì xoá trắng: HS mở lại tab giữa câu
+    // vẫn thấy đúng lựa chọn của mình và sửa tiếp được.
     useEffect(() => {
-        setChoice(null);
-        setTfAnswers({});
-        setShortText('');
-    }, [questionIndex]);
+        const saved = answersRef.current?.[uid]?.[questionIndex];
+        setChoice(saved?.choice ?? null);
+        setTfAnswers(saved?.tf || {});
+        setShortText(saved?.text || '');
+        isDraftDirtyRef.current = false;
+    }, [questionIndex, uid]);
 
     // ===== Báo cho cha khi trận kết thúc =====
     useEffect(() => {
         if (isGrading || isFinished) onFinished?.();
     }, [isGrading, isFinished]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ===== Cả phòng đã trả lời → qua câu luôn, khỏi ngồi chờ hết giờ =====
+    //
+    // Chỉ đếm người ĐANG KẾT NỐI: một người rớt mạng không được phép bắt cả
+    // phòng ngồi chờ hết 5 phút. Mọi client cùng phát hiện và cùng gọi —
+    // endQuestionEarly idempotent nên chỉ lần đầu có tác dụng.
+    const allAnsweredRef = useRef(null);
+    useEffect(() => {
+        if (phase !== 'question' || !sessionId || isPractice) return;
+
+        const activeUids = Object.entries(room?.players || {})
+            .filter(([, p]) => p.online !== false)
+            .map(([id]) => id);
+        // Một mình trong phòng thì để đồng hồ chạy như thường: rút ngắn ở đây
+        // biến trận thành bấm-là-xong, không còn là thi đấu nữa.
+        if (activeUids.length < 2) return;
+
+        const everyoneDone = activeUids.every((id) => answers?.[id]?.[questionIndex] !== undefined);
+        if (!everyoneDone) return;
+
+        const key = `${sessionId}:${questionIndex}`;
+        if (allAnsweredRef.current === key) return;
+        allAnsweredRef.current = key;
+
+        endQuestionEarly(sessionId, questionIndex).catch((error) => {
+            console.error('Error ending arena question early:', error);
+            allAnsweredRef.current = null;
+        });
+    }, [answers, phase, questionIndex, sessionId, room?.players, isPractice]);
 
     const question = questions[questionIndex] || null;
     const qType = question?.type || 'abcd';
@@ -157,9 +216,12 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
     const hiddenIndices = effects.fifty?.[questionIndex] || [];
     const tfHint = effects.hintTf?.[questionIndex] || null;
 
-    // Thời điểm câu hiện tại bắt đầu — suy từ deadline trừ đi thời lượng câu
+    // Thời điểm câu hiện tại bắt đầu. Đọc mốc tường minh từ meta chứ KHÔNG suy
+    // ngược từ deadline: khi cả phòng trả lời xong, deadline bị kéo về gần nên
+    // phép trừ sẽ ra mốc bắt đầu sai và elapsedMs thành số âm.
     const questionStart =
-        meta?.questionEndsAt && question ? meta.questionEndsAt - question.seconds * 1000 : 0;
+        meta?.questionStartsAt ||
+        (meta?.questionEndsAt && question ? meta.questionEndsAt - question.seconds * 1000 : 0);
 
     // ===== Nộp bài =====
     const doSubmit = async (qIndex, q) => {
@@ -175,22 +237,63 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
     doSubmitRef.current = doSubmit;
 
     const handleSubmit = async () => {
-        if (!question || alreadyAnswered || submittedRef.current[questionIndex]) return;
+        if (!question || submitting) return;
+        setSubmitting(true);
         submittedRef.current[questionIndex] = true;
         try {
             await doSubmit(questionIndex, question);
-            onToast?.({ type: 'success', message: 'Đã ghi nhận câu trả lời!' });
+            isDraftDirtyRef.current = false;
+            onToast?.({
+                type: 'success',
+                message: alreadyAnswered ? 'Đã cập nhật câu trả lời!' : 'Đã ghi nhận câu trả lời!',
+            });
         } catch {
             submittedRef.current[questionIndex] = false;
             onToast?.({ type: 'error', message: 'Không gửi được câu trả lời' });
+        } finally {
+            setSubmitting(false);
         }
     };
 
-    const canSubmit = () => {
-        if (!question || alreadyAnswered || isFrozen) return false;
+    /** Bài soạn đã đủ để nộp chưa (chưa xét đã nộp hay chưa) */
+    const isDraftComplete = () => {
+        if (!question) return false;
         if (qType === 'abcd') return choice !== null;
-        if (qType === 'true_false') return Object.keys(tfAnswers).length === (question.statements || []).length;
+        if (qType === 'true_false') {
+            return Object.keys(tfAnswers).length === (question.statements || []).length;
+        }
         return shortText.trim().length > 0;
+    };
+
+    const canSubmit = () => {
+        if (isFrozen || submitting || phase !== 'question') return false;
+        if (!isDraftComplete()) return false;
+        // Đã nộp rồi thì chỉ cho gửi lại khi thực sự có thay đổi
+        if (alreadyAnswered && !isDraftDirtyRef.current) return false;
+        return true;
+    };
+
+    // Người dùng vừa đổi lựa chọn → đánh dấu có thay đổi cần gửi
+    const markDirty = () => {
+        isDraftDirtyRef.current = true;
+    };
+
+    /**
+     * Luyện tập: bỏ qua phần thời gian còn lại của câu hiện tại.
+     *
+     * Dùng chung endQuestionEarly với chế độ thi đấu, nhưng không cần ân hạn:
+     * chỉ có một mình nên bấm là ý đã chốt.
+     */
+    const handleNextQuestion = async () => {
+        if (skipping) return;
+        setSkipping(true);
+        try {
+            await endQuestionEarly(sessionId, questionIndex, 0);
+        } catch {
+            onToast?.({ type: 'error', message: 'Không chuyển câu được' });
+        } finally {
+            setSkipping(false);
+        }
     };
 
     // ===== Vật phẩm =====
@@ -223,12 +326,20 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
         }
     };
 
+    /**
+     * Cược x2. Đặt cho CÂU ĐANG LÀM nếu đang trong câu, cho câu kế tiếp nếu
+     * đang ở khoảng chuyển câu.
+     *
+     * Trước đây chỉ cho đặt trong 5 giây chuyển câu — quá gấp, HS hoặc không kịp
+     * bấm hoặc quên mất mình đã cược câu nào. Server vẫn kiểm tra lại loại câu
+     * khi chấm nên cược vào câu đúng-sai vẫn không được nhân đôi.
+     */
     const handleDouble = async () => {
         setItemBusy('double');
         try {
-            const next = questionIndex + 1;
-            const res = await setDoubleBet(sessionId, uid, next);
-            if (res.ok) onToast?.({ type: 'success', message: `Đã cược x2 cho câu ${next + 1}! ⚡` });
+            const target = phase === 'interstitial' ? questionIndex + 1 : questionIndex;
+            const res = await setDoubleBet(sessionId, uid, target);
+            if (res.ok) onToast?.({ type: 'success', message: `Đã cược x2 cho câu ${target + 1}! ⚡` });
             else onToast?.({ type: 'info', message: 'Bạn đã dùng vật phẩm này rồi' });
         } catch {
             onToast?.({ type: 'error', message: 'Không đặt được cược' });
@@ -273,7 +384,9 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                     Hết giờ! Đang chấm điểm...
                 </p>
                 <p className="text-sm text-[#556958] dark:text-[#a5b5a8] text-center">
-                    Bảng xếp hạng sẽ hiện ra ngay khi chấm xong.
+                    {isPractice
+                        ? 'Xong là xem được đáp án đúng ngay.'
+                        : 'Bảng xếp hạng sẽ hiện ra ngay khi chấm xong.'}
                 </p>
             </div>
         );
@@ -295,8 +408,16 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
         );
     }
 
-    const timePercent = question ? (remainingMs / (question.seconds * 1000)) * 100 : 0;
+    // Chia cho thời lượng THỰC TẾ của câu (có thể đã bị rút ngắn), để thanh
+    // tiến độ không đứng yên một chỗ rồi biến mất đột ngột.
+    const questionTotalMs =
+        meta?.questionStartsAt && meta?.questionEndsAt
+            ? meta.questionEndsAt - meta.questionStartsAt
+            : (question?.seconds || 0) * 1000;
+    const timePercent = questionTotalMs > 0 ? (remainingMs / questionTotalMs) * 100 : 0;
     const isUrgent = remainingSec <= 10 && phase === 'question';
+    // Câu bị rút ngắn vì cả phòng đã xong — báo rõ để HS biết vì sao đồng hồ nhảy
+    const endedEarly = !!meta?.endedEarly && phase === 'question';
 
     return (
         <div className="space-y-3">
@@ -311,15 +432,29 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                             </span>
                         )}
                     </span>
-                    <span
-                        className={`flex items-center gap-1 text-lg font-black tabular-nums ${
-                            isUrgent ? 'text-red-500 animate-pulse' : 'text-[#111812] dark:text-white'
-                        }`}
-                    >
-                        <Icon name="timer" size={18} />
-                        {phase === 'interstitial' ? `Câu sau: ${remainingSec}s` : `${remainingSec}s`}
-                    </span>
+                    <div className="flex items-center gap-2">
+                        <span
+                            className={`flex items-center gap-1 text-lg font-black tabular-nums ${
+                                isUrgent ? 'text-red-500 animate-pulse' : 'text-[#111812] dark:text-white'
+                            }`}
+                        >
+                            <Icon name="timer" size={18} />
+                            {phase === 'interstitial' ? `Câu sau: ${remainingSec}s` : `${remainingSec}s`}
+                        </span>
+                        <ArenaDisplaySettings
+                            prefs={prefs}
+                            onFontScale={setFontScale}
+                            onImageMaxHeight={setImageMaxHeight}
+                            onReset={resetPrefs}
+                            hasImage={!!question?.questionImage}
+                        />
+                    </div>
                 </div>
+                {endedEarly && (
+                    <p className="mb-2 text-xs font-bold text-amber-600 dark:text-amber-400 text-center">
+                        ⚡ Cả phòng đã trả lời — qua câu sau {remainingSec}s. Muốn đổi đáp án thì làm ngay!
+                    </p>
+                )}
                 <div className="h-2 rounded-full bg-[#f0f5f1] dark:bg-white/10 overflow-hidden">
                     <div
                         className={`h-full rounded-full transition-all duration-200 ${
@@ -362,22 +497,25 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                                 <img
                                     src={question.questionImage}
                                     alt=""
-                                    className="inline-block max-w-full max-h-48 rounded-xl"
+                                    className="inline-block max-w-full rounded-xl"
+                                    style={{ maxHeight: `${prefs.imageMaxHeight}px` }}
                                 />
                             </div>
                         )}
                         <MathText
                             as="div"
                             className="text-lg sm:text-xl font-bold text-center text-[#111812] dark:text-white mb-5"
+                            style={{ fontSize: `${1.125 * prefs.fontScale}rem` }}
                             content={question.questionText}
                         />
 
-                        {/* Đã nộp — chờ cả phòng */}
+                        {/* Đã nộp — vẫn sửa được tới khi hết giờ */}
                         {alreadyAnswered && (
-                            <div className="mb-4 p-3 rounded-2xl bg-green-100 dark:bg-green-500/20 flex items-center gap-2">
-                                <Icon name="check_circle" size={20} className="text-green-600 dark:text-green-400" />
+                            <div className="mb-4 p-3 rounded-2xl bg-green-100 dark:bg-green-500/20 flex items-start gap-2">
+                                <Icon name="check_circle" size={20} className="shrink-0 mt-0.5 text-green-600 dark:text-green-400" />
                                 <span className="text-sm font-bold text-green-700 dark:text-green-300">
-                                    Đã ghi nhận. Kết quả công bố cuối trận.
+                                    Đã ghi nhận. Vẫn đổi được đáp án tới khi hết giờ câu này —
+                                    chọn lại rồi bấm <b>Gửi lại</b>.
                                 </span>
                             </div>
                         )}
@@ -391,8 +529,11 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                                     return (
                                         <button
                                             key={idx}
-                                            disabled={hidden || alreadyAnswered || isFrozen}
-                                            onClick={() => setChoice(idx)}
+                                            disabled={hidden || isFrozen}
+                                            onClick={() => {
+                                                markDirty();
+                                                setChoice(idx);
+                                            }}
                                             className={`flex items-start gap-2.5 p-3.5 rounded-2xl text-left font-medium transition-all
                                                 ${hidden
                                                     ? 'opacity-25 line-through bg-[#f0f5f1] dark:bg-white/5 text-[#556958] dark:text-[#a5b5a8] cursor-not-allowed'
@@ -404,7 +545,11 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                                             <span className="shrink-0 size-7 rounded-full bg-white dark:bg-white/10 shadow-sm flex items-center justify-center text-sm font-extrabold text-primary-dark dark:text-primary">
                                                 {ANSWER_LABELS[idx]}
                                             </span>
-                                            <MathText className="min-w-0 pt-0.5" content={answer.text} />
+                                            <MathText
+                                                className="min-w-0 pt-0.5"
+                                                style={{ fontSize: `${prefs.fontScale}rem` }}
+                                                content={answer.text}
+                                            />
                                         </button>
                                     );
                                 })}
@@ -433,6 +578,7 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                                             <MathText
                                                 as="div"
                                                 className="flex-1 min-w-0 font-medium text-[#111812] dark:text-white"
+                                                style={{ fontSize: `${prefs.fontScale}rem` }}
                                                 content={st.text}
                                             />
                                             {hinted && (
@@ -442,8 +588,11 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                                             )}
                                             <div className="flex gap-1.5 shrink-0">
                                                 <button
-                                                    disabled={alreadyAnswered || isFrozen}
-                                                    onClick={() => setTfAnswers((p) => ({ ...p, [si]: true }))}
+                                                    disabled={isFrozen}
+                                                    onClick={() => {
+                                                        markDirty();
+                                                        setTfAnswers((p) => ({ ...p, [si]: true }));
+                                                    }}
                                                     className={`px-3 py-1.5 rounded-xl text-sm font-extrabold transition-all disabled:opacity-50 ${
                                                         tfAnswers[si] === true
                                                             ? 'bg-green-500 text-white shadow-md'
@@ -453,8 +602,11 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                                                     Đúng
                                                 </button>
                                                 <button
-                                                    disabled={alreadyAnswered || isFrozen}
-                                                    onClick={() => setTfAnswers((p) => ({ ...p, [si]: false }))}
+                                                    disabled={isFrozen}
+                                                    onClick={() => {
+                                                        markDirty();
+                                                        setTfAnswers((p) => ({ ...p, [si]: false }));
+                                                    }}
                                                     className={`px-3 py-1.5 rounded-xl text-sm font-extrabold transition-all disabled:opacity-50 ${
                                                         tfAnswers[si] === false
                                                             ? 'bg-red-500 text-white shadow-md'
@@ -478,27 +630,44 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                             <input
                                 type="text"
                                 value={shortText}
-                                onChange={(e) => setShortText(e.target.value)}
+                                onChange={(e) => {
+                                    markDirty();
+                                    setShortText(e.target.value);
+                                }}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter' && canSubmit()) handleSubmit();
                                 }}
                                 placeholder="Nhập đáp án..."
                                 autoFocus
-                                disabled={alreadyAnswered || isFrozen}
+                                disabled={isFrozen}
+                                style={{ fontSize: `${prefs.fontScale}rem` }}
                                 className="w-full px-4 py-3 rounded-2xl bg-[#f0f5f1] dark:bg-white/5 text-[#111812] dark:text-white font-medium placeholder:text-[#556958]/60 dark:placeholder:text-[#a5b5a8]/60 outline-none focus:ring-2 focus:ring-primary transition-shadow disabled:opacity-60"
                             />
                         )}
 
-                        {!alreadyAnswered && (
-                            <Button
-                                variant="primary"
-                                icon="send"
-                                disabled={!canSubmit()}
-                                onClick={handleSubmit}
-                                className="w-full mt-4"
+                        <Button
+                            variant="primary"
+                            icon={alreadyAnswered ? 'sync' : 'send'}
+                            loading={submitting}
+                            disabled={!canSubmit()}
+                            onClick={handleSubmit}
+                            className="w-full mt-4"
+                        >
+                            {alreadyAnswered ? 'Gửi lại đáp án' : 'Trả lời'}
+                        </Button>
+
+                        {/* Luyện tập: xong câu nào đi tiếp câu đó, không phải
+                            ngồi chờ hết giờ như khi thi đấu với người khác */}
+                        {isPractice && alreadyAnswered && (
+                            <button
+                                onClick={handleNextQuestion}
+                                disabled={skipping}
+                                className="w-full mt-2 py-2.5 rounded-2xl font-extrabold text-primary-dark dark:text-primary bg-primary/10 hover:bg-primary/20 transition-colors disabled:opacity-50"
                             >
-                                Trả lời
-                            </Button>
+                                {questionIndex >= totalQuestions - 1
+                                    ? 'Nộp bài và xem đáp án →'
+                                    : 'Câu tiếp theo →'}
+                            </button>
                         )}
                     </>
                 ) : (
@@ -509,7 +678,8 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                 )}
             </div>
 
-            {/* Vật phẩm */}
+            {/* Vật phẩm — chỉ có ở chế độ thi đấu */}
+            {!isPractice && (
             <ArenaItemBar
                 owned={ownedItems}
                 used={effects.used || {}}
@@ -519,7 +689,7 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                 isFrozen={isFrozen}
                 doubleArmedFor={effects.doubleOn ?? null}
                 currentQuestionIndex={questionIndex}
-                answered={alreadyAnswered}
+                isLastQuestion={questionIndex >= totalQuestions - 1}
                 players={room?.players || {}}
                 myUid={uid}
                 busy={itemBusy}
@@ -529,14 +699,17 @@ export default function ArenaMatch({ sessionId, settings, room, onFinished, onTo
                 onHintTf={handleHintTf}
                 onFire={handleFire}
             />
+            )}
 
-            {/* Bảng theo dõi */}
-            <ArenaLiveBoard
-                players={room?.players || {}}
-                answers={answers}
-                questionIndex={questionIndex}
-                myUid={uid}
-            />
+            {/* Bảng theo dõi — chỉ có ý nghĩa khi có nhiều người */}
+            {!isPractice && (
+                <ArenaLiveBoard
+                    players={room?.players || {}}
+                    answers={answers}
+                    questionIndex={questionIndex}
+                    myUid={uid}
+                />
+            )}
         </div>
     );
 }

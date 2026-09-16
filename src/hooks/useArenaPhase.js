@@ -110,6 +110,10 @@ export const useArenaPhase = (sessionId, settings, onAutoSubmit) => {
     // Thời điểm câu hiện tại bắt đầu — để đo thời gian suy nghĩ khi nộp bài
     const questionStartedAt = useCallback(() => {
         if (!meta) return 0;
+        // Mốc tường minh là nguồn đáng tin: deadline có thể bị rút ngắn khi cả
+        // phòng đã trả lời xong, lúc đó phép trừ ngược sẽ ra mốc sai.
+        if (meta.questionStartsAt) return meta.questionStartsAt;
+
         const seconds = Number(meta.questionSeconds) || 0;
         if (meta.phase === 'question' && meta.questionEndsAt && seconds) {
             return meta.questionEndsAt - seconds * 1000;

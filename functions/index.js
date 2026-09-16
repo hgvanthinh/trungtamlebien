@@ -1095,7 +1095,7 @@ const arenaSecondsFor = (index, cfg) => {
     const abcdCount = Number(cfg.abcdCount ?? 3);
     if (index < abcdCount) return Number(cfg.abcdSeconds ?? 30);
     if (index === abcdCount) return Number(cfg.tfSeconds ?? 210);
-    return Number(cfg.shortAnswerSeconds ?? 90);
+    return Number(cfg.shortAnswerSeconds ?? 300);
 };
 
 /** Điểm tối đa của câu thứ `index` */
@@ -1262,6 +1262,9 @@ exports.startArenaMatch = moneyFunction(async ({ uid, body, db }) => {
             questionIndex: 0,
             phase: 'question',
             startedAt: now + countdownMs,
+            // Mốc bắt đầu câu, ghi tường minh: deadline có thể bị rút ngắn khi
+            // cả phòng trả lời xong, nên không suy ngược từ questionEndsAt được.
+            questionStartsAt: now + countdownMs,
             questionEndsAt: now + countdownMs + questions[0].seconds * 1000,
             questionSeconds: questions[0].seconds,
             phaseEndsAt: null,
@@ -1285,6 +1288,279 @@ exports.startArenaMatch = moneyFunction(async ({ uid, body, db }) => {
     }
 
     return { sessionId, totalQuestions: questions.length };
+});
+
+/**
+ * Bắt đầu một lượt LUYỆN TẬP một mình.
+ *
+ * Khác trận thi đấu: không phòng chờ, không đối thủ, không vật phẩm. HS vào lúc
+ * nào cũng được, miễn đúng khối mà phòng cho phép. Mỗi lượt là một session
+ * riêng, đề random lại từ đầu.
+ *
+ * Trần lượt/ngày kiểm ở đây (trước khi tạo đề) để HS không tốn công làm xong
+ * mới biết là không được tính.
+ *
+ * Client gửi: { roomId }
+ */
+exports.startArenaPractice = moneyFunction(async ({ uid, body, db }) => {
+    const { roomId } = body;
+    if (!roomId) throw new Error('Thiếu mã phòng');
+
+    const rtdb = admin.database();
+    const roomSnap = await rtdb.ref(`arena_lobbies/${roomId}`).get();
+    if (!roomSnap.exists()) throw new Error('Không tìm thấy phòng');
+
+    const room = roomSnap.val();
+    if (room.mode !== 'practice') throw new Error('Phòng này không phải phòng luyện tập');
+    if (room.status === 'closed') throw new Error('Phòng đã đóng');
+
+    const cfg = await getArenaSettings(db);
+
+    // ===== Kiểm tra điều kiện của học sinh =====
+    const userSnap = await db.doc(`users/${uid}`).get();
+    if (!userSnap.exists) throw new Error('Không tìm thấy thông tin học sinh');
+    const user = userSnap.data();
+
+    // Phòng giới hạn khối thì chỉ HS đúng khối mới vào luyện được
+    if (room.grade && Number(user.gradeLevel) !== Number(room.grade)) {
+        throw new Error(`Phòng này chỉ dành cho khối ${room.grade}`);
+    }
+
+    const dateKey = getDateKeyVN();
+    const maxPerDay = Number(cfg.practiceMaxPerDay ?? 10);
+    const stats = user.arenaPracticeStats || {};
+    const usedToday = stats.dateKey === dateKey ? Number(stats.count) || 0 : 0;
+    if (maxPerDay > 0 && usedToday >= maxPerDay) {
+        throw new Error(`Hôm nay bạn đã luyện đủ ${maxPerDay} lượt rồi, mai quay lại nhé!`);
+    }
+
+    // ===== Random đề theo đúng cơ cấu của trận thi đấu =====
+    const folderId = room.folderId || null;
+    const bankSnap = await db.collection('questionBank').where('folderId', '==', folderId).get();
+
+    const byType = { abcd: [], true_false: [], short_answer: [] };
+    bankSnap.docs.forEach((d) => {
+        const q = d.data();
+        const type = q.type || 'abcd';
+        if (byType[type]) byType[type].push(q);
+    });
+
+    const abcdCount = Number(cfg.abcdCount ?? 3);
+    if (byType.abcd.length < abcdCount || byType.true_false.length < 1 || byType.short_answer.length < 1) {
+        throw new Error('Thư mục đề không đủ câu hỏi theo cơ cấu');
+    }
+
+    const picked = [
+        ...shuffleArena(byType.abcd).slice(0, abcdCount),
+        shuffleArena(byType.true_false)[0],
+        shuffleArena(byType.short_answer)[0],
+    ];
+    const questions = picked.map((q, i) => toArenaQuestionServer(q, i, cfg));
+
+    // ===== Ghi phiên =====
+    const sessionId = rtdb.ref('arena_sessions').push().key;
+    const playerName = user.fullName || 'Học sinh';
+
+    await db.doc(`arenaSessions/${sessionId}`).set({
+        roomId,
+        mode: 'practice',
+        folderId,
+        teacherId: room.teacherId || null,
+        status: 'running',
+        playerCount: 1,
+        playerUids: [uid],
+        playerNames: { [uid]: playerName },
+        questions,
+        createdAt: nowStamp(),
+    });
+
+    // Đếm lượt NGAY khi tạo đề, không đợi nộp bài: nếu đếm lúc chấm thì HS
+    // thoát giữa chừng rồi vào lại sẽ luyện được vô hạn.
+    await db.doc(`users/${uid}`).update({
+        arenaPracticeStats: { dateKey, count: usedToday + 1 },
+        updatedAt: nowStamp(),
+    });
+
+    const now = Date.now();
+    const countdownMs = Number(cfg.countdownSeconds ?? 5) * 1000;
+    const publicQuestions = {};
+    questions.forEach((q, i) => {
+        publicQuestions[i] = stripArenaAnswers(q);
+    });
+
+    await rtdb.ref(`arena_sessions/${sessionId}`).set({
+        meta: {
+            roomId,
+            mode: 'practice',
+            status: 'running',
+            questionIndex: 0,
+            phase: 'question',
+            startedAt: now + countdownMs,
+            questionStartsAt: now + countdownMs,
+            questionEndsAt: now + countdownMs + questions[0].seconds * 1000,
+            questionSeconds: questions[0].seconds,
+            phaseEndsAt: null,
+            totalQuestions: questions.length,
+            playerCount: 1,
+        },
+        questions: publicQuestions,
+    });
+
+    return {
+        sessionId,
+        totalQuestions: questions.length,
+        usedToday: usedToday + 1,
+        maxPerDay,
+    };
+});
+
+/**
+ * Dựng phần "xem lại đáp án" cho một lượt luyện tập ĐÃ CHẤM XONG.
+ *
+ * Chỉ gọi sau khi chấm — trả đáp án đúng ra ngoài lúc đang làm bài thì hỏng
+ * toàn bộ nguyên tắc bảo mật của khối này.
+ */
+const buildPracticeReview = (questions, answers) => {
+    return questions.map((q, i) => {
+        const ans = answers[i] || null;
+        const earned = gradeArenaQuestion(q, ans);
+        const base = {
+            index: i,
+            type: q.type,
+            questionText: q.questionText || '',
+            questionImage: q.questionImage || '',
+            points: q.points,
+            earned: Math.round(earned * 100) / 100,
+        };
+
+        if (q.type === 'true_false') {
+            return {
+                ...base,
+                statements: (q.statements || []).map((st, si) => ({
+                    text: st.text,
+                    isTrue: !!st.isTrue,
+                    chosen: ans?.tf?.[si] ?? null,
+                })),
+            };
+        }
+        if (q.type === 'short_answer') {
+            return {
+                ...base,
+                correctAnswer: q.correctAnswer || '',
+                alternativeAnswers: q.alternativeAnswers || [],
+                given: ans?.text ?? '',
+            };
+        }
+        return {
+            ...base,
+            answers: (q.answers || []).map((a) => ({ text: a.text, isCorrect: !!a.isCorrect })),
+            chosen: typeof ans?.choice === 'number' ? ans.choice : null,
+        };
+    });
+};
+
+/**
+ * Chấm một lượt luyện tập và cộng điểm tích luỹ.
+ *
+ * Khác trận thi đấu ở hai chỗ:
+ * 1. Điểm tích luỹ = ĐÚNG BẰNG điểm bài làm (được 5đ thì cộng 5đ), không theo
+ *    thứ hạng. Vẫn chịu chung trần `dailyCapPoints` với thi đấu.
+ * 2. Trả về ĐÁP ÁN ĐÚNG để HS xem lại mình sai ở đâu — chỉ trả sau khi đã chấm
+ *    xong nên không lộ đề lúc đang làm.
+ *
+ * Idempotent: gọi lại trả về đúng kết quả đã chốt, không cộng điểm hai lần.
+ *
+ * Client gửi: { sessionId }
+ */
+exports.finalizeArenaPractice = moneyFunction(async ({ uid, body, db }) => {
+    const { sessionId } = body;
+    if (!sessionId) throw new Error('Thiếu mã lượt luyện tập');
+
+    const sessionRef = db.doc(`arenaSessions/${sessionId}`);
+    const sessionSnap = await sessionRef.get();
+    if (!sessionSnap.exists) throw new Error('Không tìm thấy lượt luyện tập');
+
+    const session = sessionSnap.data();
+    if (session.mode !== 'practice') throw new Error('Đây không phải lượt luyện tập');
+    if (!(session.playerUids || []).includes(uid)) throw new Error('Bạn không làm lượt này');
+
+    const rtdb = admin.database();
+    const sessionPath = `arena_sessions/${sessionId}`;
+    const questions = session.questions || [];
+
+    // Đã chấm rồi → trả lại kết quả cũ, tuyệt đối không cộng điểm lần nữa
+    if (session.practiceResult) {
+        return {
+            ...session.practiceResult,
+            review: buildPracticeReview(questions, session.lastAnswers || {}),
+        };
+    }
+
+    const [metaSnap, answersSnap] = await Promise.all([
+        rtdb.ref(`${sessionPath}/meta`).get(),
+        rtdb.ref(`${sessionPath}/answers/${uid}`).get(),
+    ]);
+
+    const meta = metaSnap.val() || {};
+    const finished = meta.status === 'grading' || meta.status === 'finished';
+    if (!finished && Date.now() < Number(meta.questionEndsAt || 0)) {
+        throw new Error('Lượt luyện tập chưa kết thúc');
+    }
+
+    const answers = answersSnap.val() || {};
+
+    let score = 0;
+    questions.forEach((q, i) => {
+        score += gradeArenaQuestion(q, answers[i]);
+    });
+    score = Math.round(score * 100) / 100;
+
+    // ===== Cộng điểm tích luỹ = đúng bằng điểm bài làm =====
+    const cfg = await getArenaSettings(db);
+    const cap = Number(cfg.dailyCapPoints ?? 100);
+    const dateKey = getDateKeyVN();
+    const userRef = db.doc(`users/${uid}`);
+
+    const award = await db.runTransaction(async (t) => {
+        const userDoc = await t.get(userRef);
+        if (!userDoc.exists) throw new Error('Không tìm thấy thông tin người dùng');
+        const user = userDoc.data();
+
+        // Dùng CHUNG quỹ điểm ngày với thi đấu: luyện tập không phải đường vòng
+        // để vượt trần 100đ/ngày.
+        const stats = user.arenaStats || {};
+        const usedToday = stats.dateKey === dateKey ? Number(stats.points) || 0 : 0;
+        const granted = Math.min(score, Math.max(0, cap - usedToday));
+
+        if (granted <= 0) {
+            return { points: 0, capped: score > 0, usedToday, cap };
+        }
+
+        t.update(userRef, {
+            totalBehaviorPoints: (Number(user.totalBehaviorPoints) || 0) + granted,
+            arenaStats: { dateKey, points: usedToday + granted },
+            updatedAt: nowStamp(),
+        });
+
+        return { points: granted, capped: granted < score, usedToday: usedToday + granted, cap };
+    });
+
+    const result = {
+        score,
+        maxScore: questions.reduce((sum, q) => sum + (Number(q.points) || 0), 0),
+        ...award,
+    };
+
+    // Lưu lại bài làm để lần gọi sau dựng được phần xem đáp án y như lần đầu
+    await sessionRef.update({
+        practiceResult: result,
+        lastAnswers: answers,
+        status: 'finished',
+        finalizedAt: nowStamp(),
+    });
+    await rtdb.ref(`${sessionPath}/meta/status`).set('finished').catch(() => {});
+
+    return { ...result, review: buildPracticeReview(questions, answers) };
 });
 
 /**
@@ -1384,7 +1660,89 @@ exports.finalizeArenaMatch = moneyFunction(async ({ uid, body, db }) => {
     await rtdb.ref(`${sessionPath}/results`).set({ ranking, gradedAt: Date.now() });
     await rtdb.ref(`${sessionPath}/meta/status`).set('finished');
 
+    // Trả phòng về trạng thái chờ để lượt sau chơi tiếp được ngay.
+    // Nếu không làm, phòng kẹt ở 'running' vĩnh viễn: danh sách phòng vẫn hiện
+    // "đang thi đấu" dù HS đã rời hết, và admin phải xoá phòng thủ công.
+    await resetArenaRoomAfterMatch(rtdb, session.roomId);
+
     return { ranking };
+});
+
+/**
+ * Đưa phòng về trạng thái chờ sau khi trận đã chấm xong.
+ *
+ * Xoá sạch danh sách người chơi cũ: HS nào muốn đấu tiếp sẽ vào lại từ màn danh
+ * sách phòng, nên không còn "người ma" nằm trong phòng.
+ *
+ * Phòng đã bị admin đóng/xoá thì để nguyên — admin đã quyết định rồi.
+ */
+const resetArenaRoomAfterMatch = async (rtdb, roomId) => {
+    if (!roomId) return;
+
+    const roomRef = rtdb.ref(`arena_lobbies/${roomId}`);
+    const snap = await roomRef.get();
+    if (!snap.exists()) return;
+
+    const room = snap.val();
+    if (room.status === 'closed') return;
+
+    await roomRef.update({
+        status: 'open',
+        sessionId: null,
+        countdownEndsAt: null,
+        players: null,
+        playerCount: 0,
+        // Phòng uỷ quyền: trả chủ phòng về giáo viên để HS lượt sau giành lại quyền
+        hostUid: room.allowStudentHost ? room.teacherId || room.hostUid : room.hostUid,
+        lastActivityAt: Date.now(),
+    });
+
+    try {
+        await rtdb.ref(`arena_open_rooms/${roomId}`).update({
+            status: 'open',
+            playerCount: 0,
+        });
+    } catch {
+        // Phòng đã bị gỡ khỏi danh sách công khai — không sao
+    }
+};
+
+/**
+ * Dọn một phòng Đấu Trường bị bỏ hoang.
+ *
+ * Tình huống: cả phòng thoát giữa trận, không còn ai kích hoạt việc chấm điểm,
+ * nên phòng kẹt ở 'running' và danh sách phòng cứ báo "đang thi đấu" với một
+ * phòng trống. Học sinh không ghi được `status` của phòng (rules chỉ cho admin),
+ * nên việc dọn phải chạy ở đây.
+ *
+ * Chỉ dọn khi phòng THỰC SỰ không còn ai đang kết nối — không ai dùng hàm này
+ * để đá cả phòng ra giữa trận được.
+ *
+ * Client gửi: { roomId }
+ */
+exports.cleanupArenaRoom = moneyFunction(async ({ body }) => {
+    const { roomId } = body;
+    if (!roomId) throw new Error('Thiếu mã phòng');
+
+    const rtdb = admin.database();
+    const roomSnap = await rtdb.ref(`arena_lobbies/${roomId}`).get();
+    if (!roomSnap.exists()) return { cleaned: false, reason: 'room_not_found' };
+
+    const room = roomSnap.val();
+    if (room.status === 'closed') return { cleaned: false, reason: 'room_closed' };
+
+    const onlineCount = Object.values(room.players || {}).filter(
+        (p) => p && p.online !== false
+    ).length;
+    if (onlineCount > 0) return { cleaned: false, reason: 'still_playing' };
+
+    // Trận đang dở mà không còn ai → đánh dấu đã kết thúc để không treo mãi
+    if (room.sessionId) {
+        await rtdb.ref(`arena_sessions/${room.sessionId}/meta/status`).set('finished').catch(() => {});
+    }
+
+    await resetArenaRoomAfterMatch(rtdb, roomId);
+    return { cleaned: true };
 });
 
 /**
@@ -1421,9 +1779,8 @@ exports.useArenaHint = moneyFunction(async ({ uid, body, db }) => {
     if (meta.status !== 'running') throw new Error('Trận đấu không trong lúc thi đấu');
     if (Number(meta.questionIndex) !== index) throw new Error('Chỉ dùng được cho câu đang làm');
 
-    // Đã trả lời câu này rồi thì dùng vật phẩm không còn ý nghĩa
-    const answeredSnap = await rtdb.ref(`${sessionPath}/answers/${uid}/${index}`).get();
-    if (answeredSnap.exists()) throw new Error('Bạn đã trả lời câu này rồi');
+    // KHÔNG chặn khi đã trả lời: học sinh sửa được đáp án tới khi hết giờ, nên
+    // dùng gợi ý sau khi lỡ chọn vẫn có ý nghĩa.
 
     // Chốt quyền dùng bằng transaction TRƯỚC khi tính kết quả, hai request
     // song song thì chỉ một cái qua được.

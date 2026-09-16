@@ -18,7 +18,7 @@ export const DEFAULT_ARENA_SETTINGS = {
     tfPoints: 2,
 
     // Câu điền đáp án
-    shortAnswerSeconds: 90,
+    shortAnswerSeconds: 300,  // 5 phút
     shortAnswerPoints: 1,
 
     // Nhịp trận
@@ -34,6 +34,10 @@ export const DEFAULT_ARENA_SETTINGS = {
     rewards: { 1: 50, 2: 40, 3: 30, 4: 20, 5: 20 },
     dailyCapPoints: 100,
 
+    // Luyện tập một mình: điểm tích luỹ = đúng bằng điểm bài làm, nhưng chung
+    // trần dailyCapPoints với thi đấu. 0 = không giới hạn số lượt.
+    practiceMaxPerDay: 10,
+
     // Vật phẩm nhân đôi KHÔNG áp dụng cho câu đúng-sai 2đ (tránh vỡ cân bằng)
     doubleAllowedTypes: ['abcd', 'short_answer']
 };
@@ -44,6 +48,37 @@ export const DEFAULT_ARENA_SETTINGS = {
  * Dùng chung giữa client (hiển thị luật) và Cloud Function (chấm thật).
  */
 export const TF_RATIO = [0, 0.1, 0.25, 0.5, 1];
+
+/**
+ * Các mốc thời gian dựng sẵn cho admin chọn nhanh trong trang cài đặt.
+ * Admin vẫn nhập được số bất kỳ — đây chỉ là lối tắt cho các mốc hay dùng.
+ */
+export const TIME_PRESETS = [
+    { seconds: 15, label: '15 giây' },
+    { seconds: 30, label: '30 giây' },
+    { seconds: 45, label: '45 giây' },
+    { seconds: 60, label: '1 phút' },
+    { seconds: 90, label: '1 phút 30' },
+    { seconds: 120, label: '2 phút' },
+    { seconds: 180, label: '3 phút' },
+    { seconds: 210, label: '3 phút 30' },
+    { seconds: 300, label: '5 phút' },
+    { seconds: 420, label: '7 phút' },
+    { seconds: 600, label: '10 phút' },
+];
+
+/**
+ * Hiển thị số giây thành chuỗi dễ đọc ("5 phút", "1 phút 30 giây", "45 giây").
+ * @param {number} seconds
+ * @returns {string}
+ */
+export const formatSeconds = (seconds) => {
+    const total = Number(seconds) || 0;
+    if (total < 60) return `${total} giây`;
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return s ? `${m} phút ${s} giây` : `${m} phút`;
+};
 
 const SETTINGS_REF = () => doc(db, 'settings', 'arenaGame');
 

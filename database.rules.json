@@ -66,8 +66,7 @@
 
         "answers": {
           "$uid": {
-            ".write": "auth.uid == $uid",
-            "$qIndex": { ".validate": "!data.exists()" }
+            ".write": "auth.uid == $uid"
           }
         },
 

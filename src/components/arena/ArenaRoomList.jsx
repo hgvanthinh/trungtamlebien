@@ -1,9 +1,14 @@
 import { useState, useEffect } from 'react';
 import Icon from '../common/Icon';
-import { listenToOpenArenaRooms } from '../../services/arenaSessionService';
+import { listenToOpenArenaRooms, ARENA_MODE } from '../../services/arenaSessionService';
 
 /**
  * Danh sách phòng Đấu Trường đang mở.
+ *
+ * Hai loại phòng nằm chung một danh sách nhưng đọc rất khác nhau:
+ * - Luyện tập: vào lúc nào cũng được, làm một mình → luôn bấm được.
+ * - Thi đấu: phải chờ đủ người và chưa vào trận → khoá khi đang thi đấu.
+ *
  * Lọc theo khối của HS — phòng có grade = null thì mọi khối đều vào được.
  */
 export default function ArenaRoomList({ myGrade, onJoin, minPlayers = 5 }) {
@@ -46,17 +51,25 @@ export default function ArenaRoomList({ myGrade, onJoin, minPlayers = 5 }) {
         );
     }
 
+    // Phòng luyện tập lên trước: đó là thứ HS vào được bất cứ lúc nào
+    const sorted = [...visible].sort((a, b) => {
+        const ap = a.mode === ARENA_MODE.PRACTICE ? 0 : 1;
+        const bp = b.mode === ARENA_MODE.PRACTICE ? 0 : 1;
+        return ap - bp;
+    });
+
     return (
         <div className="space-y-2.5">
-            {visible.map((room) => {
-                const isRunning = room.status === 'running';
+            {sorted.map((room) => {
+                const isPractice = room.mode === ARENA_MODE.PRACTICE;
+                const isRunning = !isPractice && room.status === 'running';
                 const count = Number(room.playerCount) || 0;
                 const enough = count >= minPlayers;
 
                 return (
                     <button
                         key={room.id}
-                        onClick={() => !isRunning && onJoin(room.id)}
+                        onClick={() => !isRunning && onJoin(room.id, room.mode)}
                         disabled={isRunning}
                         className={`w-full clay-card p-4 flex items-center gap-3 text-left transition-all
                             ${isRunning
@@ -64,8 +77,18 @@ export default function ArenaRoomList({ myGrade, onJoin, minPlayers = 5 }) {
                                 : 'hover:scale-[1.01] active:scale-[0.99]'
                             }`}
                     >
-                        <span className="shrink-0 size-12 rounded-2xl bg-gradient-to-br from-primary to-primary-dark flex items-center justify-center">
-                            <Icon name="stadium" size={26} className="text-white" />
+                        <span
+                            className={`shrink-0 size-12 rounded-2xl bg-gradient-to-br flex items-center justify-center ${
+                                isPractice
+                                    ? 'from-sky-400 to-indigo-500'
+                                    : 'from-primary to-primary-dark'
+                            }`}
+                        >
+                            <Icon
+                                name={isPractice ? 'self_improvement' : 'stadium'}
+                                size={26}
+                                className="text-white"
+                            />
                         </span>
 
                         <div className="flex-1 min-w-0">
@@ -80,14 +103,29 @@ export default function ArenaRoomList({ myGrade, onJoin, minPlayers = 5 }) {
                                     </span>
                                 )}
                                 {room.grade && <span>Khối {room.grade}</span>}
-                                <span className={`flex items-center gap-0.5 font-bold ${enough ? 'text-green-600 dark:text-green-400' : ''}`}>
-                                    <Icon name="group" size={13} />
-                                    {count}/{minPlayers} người
-                                </span>
+                                {isPractice ? (
+                                    <span className="flex items-center gap-0.5 font-bold text-sky-600 dark:text-sky-400">
+                                        <Icon name="person" size={13} />
+                                        Luyện một mình
+                                    </span>
+                                ) : (
+                                    <span
+                                        className={`flex items-center gap-0.5 font-bold ${
+                                            enough ? 'text-green-600 dark:text-green-400' : ''
+                                        }`}
+                                    >
+                                        <Icon name="group" size={13} />
+                                        {count}/{minPlayers} người
+                                    </span>
+                                )}
                             </div>
                         </div>
 
-                        {isRunning ? (
+                        {isPractice ? (
+                            <span className="shrink-0 px-2.5 py-1 rounded-full bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300 text-xs font-extrabold">
+                                Luyện tập
+                            </span>
+                        ) : isRunning ? (
                             <span className="shrink-0 px-2.5 py-1 rounded-full bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 text-xs font-extrabold">
                                 Đang thi đấu
                             </span>

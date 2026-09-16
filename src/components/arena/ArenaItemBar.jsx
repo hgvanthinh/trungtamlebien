@@ -29,7 +29,7 @@ export default function ArenaItemBar({
     isFrozen,
     doubleArmedFor = null,
     currentQuestionIndex = 0,
-    answered = false,
+    isLastQuestion = false,
     players = {},
     myUid,
     onFreeze,
@@ -61,22 +61,25 @@ export default function ArenaItemBar({
                 return null;
             }
             case 'double': {
-                // Đặt cược TRƯỚC khi vào câu kế — chỉ mở trong khoảng chuyển câu
-                if (phase !== 'interstitial') return 'Chỉ đặt giữa 2 câu';
-                if (!nextQuestionType) return 'Đã hết câu';
-                if (!isEffectUsableForType('double', nextQuestionType)) return 'Câu sau không áp dụng';
+                // Cược được BẤT CỨ LÚC NÀO: trong câu thì cược cho chính câu đó,
+                // giữa 2 câu thì cược cho câu sắp tới. Cửa sổ 5 giây chuyển câu
+                // trước đây quá hẹp, HS bấm không kịp hoặc quên mất.
+                const target = phase === 'interstitial' ? nextQuestionType : questionType;
+                if (phase === 'interstitial' && isLastQuestion) return 'Đã hết câu';
+                if (!target) return 'Chờ vào câu';
+                if (!isEffectUsableForType('double', target)) {
+                    return phase === 'interstitial' ? 'Câu sau không áp dụng' : 'Câu này không áp dụng';
+                }
                 return null;
             }
             case 'fifty': {
                 if (phase !== 'question') return 'Chờ vào câu';
                 if (!isEffectUsableForType('fifty', questionType)) return 'Chỉ câu 4 đáp án';
-                if (answered) return 'Đã trả lời';
                 return null;
             }
             case 'hint_tf': {
                 if (phase !== 'question') return 'Chờ vào câu';
                 if (!isEffectUsableForType('hint_tf', questionType)) return 'Chỉ câu đúng-sai';
-                if (answered) return 'Đã trả lời';
                 return null;
             }
             case 'fire':
@@ -121,9 +124,9 @@ export default function ArenaItemBar({
                     <span className="text-sm font-extrabold text-[#111812] dark:text-white">
                         Vật phẩm
                     </span>
-                    {doubleArmedFor === currentQuestionIndex && (
+                    {doubleArmedFor !== null && doubleArmedFor >= currentQuestionIndex && (
                         <span className="ml-auto px-2 py-0.5 rounded-full bg-amber-400 text-amber-950 text-xs font-extrabold animate-pulse">
-                            ⚡ Đang cược x2
+                            ⚡ Cược x2 câu {doubleArmedFor + 1}
                         </span>
                     )}
                 </div>

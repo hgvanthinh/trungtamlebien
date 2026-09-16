@@ -60,6 +60,17 @@ import {
     getQuestionSeconds,
 } from './arenaSettingsService';
 
+/**
+ * Hai chế độ phòng:
+ * - LIVE: cả phòng thi cùng lúc, chủ phòng bấm bắt đầu (chế độ gốc).
+ * - PRACTICE: phòng mở thường trực, HS vào lúc nào cũng được, làm một mình với
+ *   đề random. Không chờ ai, không vật phẩm, xong là biết đáp án ngay.
+ */
+export const ARENA_MODE = {
+    LIVE: 'live',
+    PRACTICE: 'practice',
+};
+
 const ROOMS_PATH = 'arena_lobbies';
 const SESSIONS_PATH = 'arena_sessions';
 const ACTIVE_ROOMS_PATH = 'arena_active_rooms';
@@ -70,23 +81,27 @@ const OPEN_ROOMS_PATH = 'arena_open_rooms';
 /**
  * Lấy danh sách roomId đang mở của admin, tự dọn pointer của phòng đã đóng.
  * @param {string} teacherId - adminUid
+ * @param {string|null} onlyMode - chỉ đếm phòng thuộc chế độ này ('live'|'practice')
  * @returns {Promise<string[]>}
  */
-export async function getActiveRooms(teacherId) {
+export async function getActiveRooms(teacherId, onlyMode = null) {
     const snap = await get(ref(realtimeDb, `${ACTIVE_ROOMS_PATH}/${teacherId}`));
     if (!snap.exists()) return [];
 
     const ids = Object.keys(snap.val());
     const checks = await Promise.all(
         ids.map(async (id) => {
-            const s = await get(ref(realtimeDb, `${ROOMS_PATH}/${id}/status`));
-            const status = s.val();
+            const roomSnap = await get(ref(realtimeDb, `${ROOMS_PATH}/${id}`));
+            const room = roomSnap.val();
+            const status = room?.status;
             // Phòng đang chạy trận vẫn tính là đang chiếm slot
-            return { id, active: status === 'open' || status === 'countdown' || status === 'running' };
+            const live = status === 'open' || status === 'countdown' || status === 'running';
+            const mode = room?.mode || ARENA_MODE.LIVE;
+            return { id, active: live && (!onlyMode || mode === onlyMode), live };
         })
     );
 
-    const stale = checks.filter((c) => !c.active);
+    const stale = checks.filter((c) => !c.live);
     if (stale.length) {
         await Promise.all(
             stale.map(async (c) => {
@@ -117,12 +132,17 @@ export async function openArenaRoom({
     folderName = '',
     grade = null,
     allowStudentHost = false,
+    mode = ARENA_MODE.LIVE,
 }) {
     const settings = await getArenaSettings();
-    const openIds = await getActiveRooms(teacherId);
 
-    if (openIds.length >= (settings.maxOpenRooms ?? 3)) {
-        return { ok: false, reason: 'limit_reached' };
+    // Hạn mức phòng chỉ áp cho phòng THI ĐẤU. Phòng luyện tập mở thường trực
+    // cho HS tự vào, nếu tính chung thì mở vài phòng luyện là hết slot thi đấu.
+    if (mode === ARENA_MODE.LIVE) {
+        const openIds = await getActiveRooms(teacherId, ARENA_MODE.LIVE);
+        if (openIds.length >= (settings.maxOpenRooms ?? 3)) {
+            return { ok: false, reason: 'limit_reached' };
+        }
     }
 
     // Kiểm tra thư mục có đủ câu theo cơ cấu trước khi mở phòng,
@@ -138,6 +158,7 @@ export async function openArenaRoom({
 
     await set(ref(realtimeDb, `${ROOMS_PATH}/${roomId}`), {
         status: 'open',
+        mode,
         teacherId,
         hostUid: teacherId,
         hostMode: 'admin',
@@ -159,6 +180,7 @@ export async function openArenaRoom({
     await set(ref(realtimeDb, `${ACTIVE_ROOMS_PATH}/${teacherId}/${roomId}`), true);
     await set(ref(realtimeDb, `${OPEN_ROOMS_PATH}/${roomId}`), {
         title,
+        mode,
         grade: safeGrade,
         folderName,
         status: 'open',
@@ -170,6 +192,7 @@ export async function openArenaRoom({
     try {
         await setDoc(doc(db, 'arenaRooms', roomId), {
             title,
+            mode,
             folderId,
             folderName,
             grade: safeGrade,
@@ -193,6 +216,39 @@ export async function closeArenaRoom(roomId, teacherId) {
     await remove(ref(realtimeDb, `${OPEN_ROOMS_PATH}/${roomId}`));
     if (teacherId) {
         await remove(ref(realtimeDb, `${ACTIVE_ROOMS_PATH}/${teacherId}/${roomId}`));
+    }
+}
+
+/**
+ * Admin mở lại phòng sau khi trận đã xong (hoặc trận treo).
+ *
+ * Xoá sạch danh sách người chơi cũ — kể cả người rớt mạng chưa kịp rời — để
+ * phòng không còn hiện "đang thi đấu" với những cái tên không còn ở đó.
+ * Cloud Function cũng tự làm việc này sau khi chấm xong; nút này là lối thoát
+ * thủ công cho trường hợp trận treo mà không ai kích hoạt được việc chấm.
+ */
+export async function reopenArenaRoom(roomId) {
+    const snap = await get(ref(realtimeDb, `${ROOMS_PATH}/${roomId}`));
+    if (!snap.exists()) return;
+    const room = snap.val();
+
+    await update(ref(realtimeDb, `${ROOMS_PATH}/${roomId}`), {
+        status: 'open',
+        sessionId: null,
+        countdownEndsAt: null,
+        players: null,
+        playerCount: 0,
+        hostUid: room.allowStudentHost ? room.teacherId || room.hostUid : room.hostUid,
+        lastActivityAt: Date.now(),
+    });
+
+    try {
+        await update(ref(realtimeDb, `${OPEN_ROOMS_PATH}/${roomId}`), {
+            status: 'open',
+            playerCount: 0,
+        });
+    } catch {
+        // Phòng không còn trong danh sách công khai
     }
 }
 
@@ -252,6 +308,9 @@ export async function joinArenaRoom(roomId, uid, { name, avatar, borderUrl, grad
 
 /**
  * HS rời phòng. Nếu là chủ phòng thì chuyển quyền cho người vào sớm nhất còn lại.
+ *
+ * Gọi cả khi rời giữa trận: nếu không, phòng giữ mãi tên người đã thoát và
+ * danh sách phòng vẫn báo "đang thi đấu" dù không còn ai.
  */
 export async function leaveArenaRoom(roomId, uid) {
     onDisconnect(ref(realtimeDb, `${ROOMS_PATH}/${roomId}/players/${uid}/online`)).cancel();
@@ -260,8 +319,12 @@ export async function leaveArenaRoom(roomId, uid) {
     } catch {
         // phòng đã bị xoá — coi như đã rời
     }
-    await syncRoomPlayerCount(roomId);
+    const remaining = await syncRoomPlayerCount(roomId);
     await reassignHostIfNeeded(roomId, uid);
+
+    // Người cuối cùng rời đi → phòng cần được dọn. Việc dọn (ghi `status`) chỉ
+    // Cloud Function làm được, nên chỉ báo lại để nơi gọi quyết định.
+    return { wasLastPlayer: remaining === 0 };
 }
 
 /**
@@ -417,11 +480,15 @@ async function fetchFolderQuestions(folderId) {
  */
 export async function advanceArenaPhase(sessionId, expectedIndex, expectedPhase, settings) {
     const metaRef = ref(realtimeDb, `${SESSIONS_PATH}/${sessionId}/meta`);
-    const interstitialMs = (settings.interstitialSeconds ?? 5) * 1000;
 
     const result = await runTransaction(metaRef, (meta) => {
         if (!meta || meta.status !== 'running') return meta;
         if (meta.questionIndex !== expectedIndex || meta.phase !== expectedPhase) return meta;
+
+        // Luyện tập một mình thì không có ai để chờ — bỏ luôn khoảng chuyển câu
+        // (vốn chỉ sinh ra làm cửa sổ đặt cược x2 cho chế độ thi đấu).
+        const interstitialMs =
+            meta.mode === 'practice' ? 0 : (settings.interstitialSeconds ?? 5) * 1000;
 
         if (expectedPhase === 'question') {
             // Câu cuối vừa hết giờ → chuyển sang chờ chấm
@@ -442,9 +509,12 @@ export async function advanceArenaPhase(sessionId, expectedIndex, expectedPhase,
             ...meta,
             questionIndex: next,
             phase: 'question',
+            questionStartsAt: meta.phaseEndsAt,
             questionEndsAt: meta.phaseEndsAt + nextSeconds * 1000,
             questionSeconds: nextSeconds,
             phaseEndsAt: null,
+            // Cờ "rút ngắn" chỉ thuộc về câu vừa qua — không được dính sang câu mới
+            endedEarly: null,
         };
     });
 
@@ -487,8 +557,11 @@ export async function forceFinishArenaMatch(sessionId) {
 // ==================== TRẢ LỜI ====================
 
 /**
- * HS nộp câu trả lời. Rules chặn ghi đè nên chỉ lần đầu có tác dụng —
- * không cần transaction, và HS không sửa lại được sau khi nộp.
+ * HS nộp câu trả lời. CHO PHÉP NỘP LẠI tới khi hết giờ câu đó —
+ * lỡ tay chọn nhầm thì sửa được, bản ghi sau đè lên bản trước.
+ *
+ * `elapsedMs` luôn tính theo LẦN NỘP CUỐI, nên sửa đáp án đồng nghĩa với mất
+ * lợi thế tốc độ khi so kè điểm bằng nhau — đó là cái giá của việc đổi ý.
  *
  * KHÔNG chấm ở đây. Client không biết đáp án; Cloud Function chấm cuối trận.
  *
@@ -511,10 +584,43 @@ export async function submitArenaAnswer(sessionId, uid, qIndex, answer, elapsedM
         await set(ref(realtimeDb, `${SESSIONS_PATH}/${sessionId}/answers/${uid}/${qIndex}`), payload);
         return true;
     } catch (error) {
-        // Ghi đè bị rules chặn = đã nộp câu này rồi, không phải lỗi thật
-        console.warn('Arena answer not saved (có thể đã nộp trước đó):', error?.message);
+        console.warn('Arena answer not saved:', error?.message);
         return false;
     }
+}
+
+/**
+ * Rút ngắn câu hiện tại vì cả phòng đã trả lời xong.
+ *
+ * KHÔNG cắt ngay lập tức mà để lại `graceMs` giây ân hạn: đáp án nộp rồi vẫn
+ * sửa được, nên cắt phựt một cái sẽ cướp mất cơ hội đổi ý của người vừa bấm.
+ *
+ * Không nhảy thẳng sang câu sau mà chỉ KÉO DEADLINE về gần: nhịp trận vẫn do
+ * advanceArenaPhase quyết định như bình thường, nên mọi client cùng thấy một
+ * mốc và không ai bị bỏ lỡ khoảng chuyển câu.
+ *
+ * Idempotent: deadline đã sớm hơn mốc mới thì huỷ giao dịch, nên nhiều client
+ * cùng gọi cũng không đẩy câu đi sớm hơn nữa.
+ *
+ * @param {string} sessionId
+ * @param {number} expectedIndex - câu mà client đang thấy
+ * @param {number} graceMs - thời gian còn lại để đổi ý
+ * @returns {Promise<boolean>} - true nếu chính lần gọi này rút ngắn deadline
+ */
+export async function endQuestionEarly(sessionId, expectedIndex, graceMs = 5000) {
+    const metaRef = ref(realtimeDb, `${SESSIONS_PATH}/${sessionId}/meta`);
+    const target = serverNowSync() + Math.max(0, graceMs);
+
+    const result = await runTransaction(metaRef, (meta) => {
+        if (!meta || meta.status !== 'running') return undefined;
+        if (meta.phase !== 'question' || meta.questionIndex !== expectedIndex) return undefined;
+        // Sắp hết giờ sẵn rồi → đừng kéo dài thêm
+        if (!meta.questionEndsAt || meta.questionEndsAt <= target) return undefined;
+
+        return { ...meta, questionEndsAt: target, endedEarly: true };
+    });
+
+    return result.committed;
 }
 
 // ==================== VẬT PHẨM ====================

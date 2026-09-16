@@ -6,19 +6,28 @@ import ArenaRoomList from '../components/arena/ArenaRoomList';
 import ArenaLobby from '../components/arena/ArenaLobby';
 import ArenaMatch from '../components/arena/ArenaMatch';
 import ArenaResult from '../components/arena/ArenaResult';
+import ArenaPracticeResult from '../components/arena/ArenaPracticeResult';
 import {
     joinArenaRoom,
     leaveArenaRoom,
     listenToArenaRoom,
+    ARENA_MODE,
 } from '../services/arenaSessionService';
 import { getArenaSettings } from '../services/arenaSettingsService';
+import { cleanupArenaRoom, startArenaPractice } from '../services/arenaRewardService';
 
 /**
  * Trang Đấu Trường (HS).
  *
- * Máy trạng thái 4 màn: rooms → lobby → match → result.
- * Việc chuyển màn do LISTENER trên node phòng quyết định, không do người bấm:
- * chủ phòng bấm bắt đầu thì mọi client thấy status đổi và cùng vào trận.
+ * Hai luồng tách biệt, chọn theo `mode` của phòng:
+ *
+ * - Thi đấu (live):  rooms → lobby → match → result
+ *   Chuyển màn do LISTENER trên node phòng quyết định, không do người bấm:
+ *   chủ phòng bấm bắt đầu thì mọi client thấy status đổi và cùng vào trận.
+ *
+ * - Luyện tập (practice):  rooms → match → practiceResult
+ *   Không phòng chờ, không đối thủ. Bấm vào là server tạo đề riêng và HS làm
+ *   ngay, nên không cần nghe node phòng.
  */
 export default function Arena() {
     const { currentUser, userProfile } = useAuth();
@@ -31,6 +40,8 @@ export default function Arena() {
     const [settings, setSettings] = useState(null);
     const [toast, setToast] = useState(null);
     const [joining, setJoining] = useState(false);
+    // Chế độ của phòng đang chơi — quyết định dùng luồng nào
+    const [mode, setMode] = useState(ARENA_MODE.LIVE);
 
     // Giữ lại danh sách người chơi lúc vào trận — sau khi trận xong, node phòng
     // có thể đã bị dọn nhưng bảng xếp hạng vẫn cần avatar/viền để hiển thị.
@@ -43,7 +54,8 @@ export default function Arena() {
 
     // ===== Nghe phòng =====
     useEffect(() => {
-        if (!roomId) return undefined;
+        // Luyện tập không qua phòng chờ nên không cần nghe node phòng
+        if (!roomId || mode === ARENA_MODE.PRACTICE) return undefined;
 
         return listenToArenaRoom(roomId, (data) => {
             setRoom(data);
@@ -74,12 +86,42 @@ export default function Arena() {
                 setView((v) => (v === 'result' ? v : 'match'));
             }
         });
-    }, [roomId]);
+    }, [roomId, mode]);
 
-    const handleJoin = async (id) => {
+    /**
+     * Bắt đầu (hoặc bắt đầu lại) một lượt luyện tập.
+     *
+     * Mỗi lượt là một session mới với đề random lại — server tự kiểm tra khối
+     * và số lượt còn lại trong ngày, nên client chỉ cần báo lỗi ra màn hình.
+     */
+    const startPractice = async (id) => {
+        const res = await startArenaPractice(id);
+        // Xoá dấu vết phòng thi đấu trước đó trong cùng phiên — luyện tập là
+        // một mình, không được mang theo danh sách người chơi cũ.
+        playersSnapshotRef.current = {};
+        setRoom(null);
+        setRoomId(id);
+        setMode(ARENA_MODE.PRACTICE);
+        setSessionId(res.sessionId);
+        setView('match');
+
+        if (res.maxPerDay > 0) {
+            setToast({
+                type: 'info',
+                message: `Lượt luyện thứ ${res.usedToday}/${res.maxPerDay} hôm nay`,
+            });
+        }
+    };
+
+    const handleJoin = async (id, roomMode) => {
         if (joining) return;
         setJoining(true);
         try {
+            if (roomMode === ARENA_MODE.PRACTICE) {
+                await startPractice(id);
+                return;
+            }
+
             const res = await joinArenaRoom(id, uid, {
                 name: userProfile?.fullName || 'Học sinh',
                 avatar: userProfile?.avatar || '',
@@ -98,18 +140,50 @@ export default function Arena() {
             }
 
             setRoomId(id);
+            setMode(ARENA_MODE.LIVE);
             setView('lobby');
-        } catch {
-            setToast({ type: 'error', message: 'Không vào được phòng' });
+        } catch (error) {
+            setToast({ type: 'error', message: error.message || 'Không vào được phòng' });
+        } finally {
+            setJoining(false);
+        }
+    };
+
+    /** Luyện tiếp một lượt mới trong cùng phòng */
+    const handlePracticeAgain = async () => {
+        if (joining || !roomId) return;
+        setJoining(true);
+        try {
+            await startPractice(roomId);
+        } catch (error) {
+            setToast({ type: 'error', message: error.message || 'Không bắt đầu được lượt mới' });
         } finally {
             setJoining(false);
         }
     };
 
     const handleLeave = async () => {
+        // Luyện tập không ghi tên vào phòng nên không có gì phải dọn
+        if (mode === ARENA_MODE.PRACTICE) {
+            setRoomId(null);
+            setRoom(null);
+            setSessionId(null);
+            setMode(ARENA_MODE.LIVE);
+            setView('rooms');
+            return;
+        }
+
         if (roomId && uid) {
             try {
-                await leaveArenaRoom(roomId, uid);
+                const res = await leaveArenaRoom(roomId, uid);
+                // Người cuối cùng rời đi: nhờ server dọn phòng, nếu không phòng
+                // sẽ nằm mãi trong danh sách với trạng thái "đang thi đấu" dù
+                // chẳng còn ai. Server tự kiểm tra lại phòng có trống thật không.
+                if (res?.wasLastPlayer) {
+                    cleanupArenaRoom(roomId).catch(() => {
+                        // Dọn hụt thì admin vẫn có nút "Mở lại phòng"
+                    });
+                }
             } catch {
                 // Rời phòng lỗi thì vẫn cho HS thoát khỏi màn, không kẹt lại
             }
@@ -161,6 +235,7 @@ export default function Arena() {
                     roomId={roomId}
                     room={room}
                     myUid={uid}
+                    settings={settings}
                     onLeave={handleLeave}
                     onToast={setToast}
                 />
@@ -168,15 +243,27 @@ export default function Arena() {
 
             {view === 'match' && sessionId && (
                 <ArenaMatch
+                    key={sessionId}
                     sessionId={sessionId}
                     settings={settings}
+                    mode={mode}
                     room={{ ...room, myUid: uid, players: room?.players || playersSnapshotRef.current }}
                     onFinished={() => setView('result')}
                     onToast={setToast}
                 />
             )}
 
-            {view === 'result' && sessionId && (
+            {view === 'result' && sessionId && mode === ARENA_MODE.PRACTICE && (
+                <ArenaPracticeResult
+                    key={sessionId}
+                    sessionId={sessionId}
+                    onAgain={handlePracticeAgain}
+                    onExit={handleExitResult}
+                    onToast={setToast}
+                />
+            )}
+
+            {view === 'result' && sessionId && mode !== ARENA_MODE.PRACTICE && (
                 <ArenaResult
                     sessionId={sessionId}
                     myUid={uid}

@@ -31,9 +31,8 @@ export const ARENA_ITEM_EFFECTS = {
     double: {
         label: 'Nhân đôi điểm',
         icon: 'bolt',
-        description: 'Đặt cược trước câu sau: đúng thì được gấp đôi điểm (không áp dụng câu đúng-sai)',
+        description: 'Cược bất cứ lúc nào cho câu đang làm (hoặc câu sắp tới nếu đang chuyển câu): đúng thì được gấp đôi điểm. Không áp dụng câu đúng-sai.',
         target: 'self',
-        window: 'interstitial',
         qTypes: ['abcd', 'short_answer']
     },
     fifty: {

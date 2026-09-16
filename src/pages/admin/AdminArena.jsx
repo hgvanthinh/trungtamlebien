@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
     DEFAULT_ARENA_SETTINGS,
+    TIME_PRESETS,
+    formatSeconds,
     getArenaSettings,
     updateArenaSettings,
 } from '../../services/arenaSettingsService';
@@ -13,7 +15,14 @@ import {
     listenToArenaRoom,
     checkFolderAvailability,
     forceFinishArenaMatch,
+    reopenArenaRoom,
+    ARENA_MODE,
 } from '../../services/arenaSessionService';
+import {
+    getArenaHistory,
+    getArenaSessionDetail,
+} from '../../services/arenaHistoryService';
+import ArenaSessionDetail from '../../components/arena/ArenaSessionDetail';
 import { getFolders } from '../../services/questionFolderService';
 import { ARENA_ITEM_EFFECTS } from '../../services/arenaItemService';
 import Button from '../../components/common/Button';
@@ -25,13 +34,17 @@ const inputCls =
     'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent';
 const labelCls = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1';
 
+// Thời lượng từng dạng câu — có mốc dựng sẵn để admin bấm chọn nhanh
+const TIME_FIELDS = [
+    { key: 'abcdSeconds', label: 'Thời gian mỗi câu trắc nghiệm', min: 5 },
+    { key: 'tfSeconds', label: 'Thời gian câu đúng-sai', min: 10 },
+    { key: 'shortAnswerSeconds', label: 'Thời gian câu điền đáp án', min: 5 },
+];
+
 const SETTINGS_FIELDS = [
-    { key: 'abcdSeconds', label: 'Giây mỗi câu trắc nghiệm', min: 5 },
     { key: 'abcdPoints', label: 'Điểm mỗi câu trắc nghiệm', min: 0, step: 0.1 },
     { key: 'abcdCount', label: 'Số câu trắc nghiệm', min: 1 },
-    { key: 'tfSeconds', label: 'Giây câu đúng-sai', min: 10 },
     { key: 'tfPoints', label: 'Điểm câu đúng-sai', min: 0, step: 0.1 },
-    { key: 'shortAnswerSeconds', label: 'Giây câu điền đáp án', min: 5 },
     { key: 'shortAnswerPoints', label: 'Điểm câu điền đáp án', min: 0, step: 0.1 },
     { key: 'countdownSeconds', label: 'Đếm ngược trước câu đầu (giây)', min: 0 },
     { key: 'interstitialSeconds', label: 'Khoảng chuyển câu (giây)', min: 1 },
@@ -39,9 +52,65 @@ const SETTINGS_FIELDS = [
     { key: 'maxPlayers', label: 'Sức chứa tối đa mỗi phòng', min: 2 },
     { key: 'maxOpenRooms', label: 'Số phòng mở tối đa cùng lúc', min: 1 },
     { key: 'dailyCapPoints', label: 'Trần điểm tích luỹ mỗi ngày', min: 0 },
+    { key: 'practiceMaxPerDay', label: 'Số lượt luyện tập mỗi ngày (0 = không giới hạn)', min: 0 },
 ];
 
+/**
+ * Ô chọn thời lượng: dropdown mốc dựng sẵn + ô nhập số tự do.
+ * Giá trị không nằm trong mốc nào thì dropdown hiện "Tuỳ chỉnh".
+ */
+function TimeField({ label, value, min, onChange }) {
+    const current = Number(value) || 0;
+    const isPreset = TIME_PRESETS.some((p) => p.seconds === current);
+
+    return (
+        <div>
+            <label className={labelCls}>{label}</label>
+            <div className="flex gap-2">
+                <select
+                    value={isPreset ? String(current) : 'custom'}
+                    onChange={(e) => {
+                        if (e.target.value !== 'custom') onChange(e.target.value);
+                    }}
+                    className={inputCls}
+                >
+                    {TIME_PRESETS.map((p) => (
+                        <option key={p.seconds} value={p.seconds}>
+                            {p.label}
+                        </option>
+                    ))}
+                    <option value="custom">Tuỳ chỉnh...</option>
+                </select>
+                <input
+                    type="number"
+                    min={min}
+                    value={value ?? ''}
+                    onChange={(e) => onChange(e.target.value)}
+                    title="Số giây"
+                    className={`${inputCls} w-24 shrink-0`}
+                />
+            </div>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                = {formatSeconds(current)}
+            </p>
+        </div>
+    );
+}
+
 const GRADES = [6, 7, 8, 9, 10, 11, 12];
+
+/** Firestore Timestamp (hoặc số ms) → chuỗi ngày giờ tiếng Việt */
+const formatHistoryDate = (ts) => {
+    if (!ts) return '—';
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
 
 export default function AdminArena() {
     const { currentUser } = useAuth();
@@ -59,9 +128,16 @@ export default function AdminArena() {
         folderId: '',
         grade: '',
         allowStudentHost: false,
+        mode: ARENA_MODE.LIVE,
     });
     const [folderCheck, setFolderCheck] = useState(null);
     const [watchingRoomId, setWatchingRoomId] = useState(null);
+
+    // Lịch sử trận
+    const [history, setHistory] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyFilter, setHistoryFilter] = useState('all');
+    const [detail, setDetail] = useState(null);
 
     // Cài đặt
     const [settings, setSettings] = useState(DEFAULT_ARENA_SETTINGS);
@@ -90,6 +166,30 @@ export default function AdminArena() {
             .catch(() => setFolderCheck(null));
     }, [form.folderId]);
 
+    // Chỉ tải khi admin thực sự mở tab lịch sử — đây là truy vấn nặng nhất trang
+    useEffect(() => {
+        if (tab !== 'history') return;
+        setHistoryLoading(true);
+        getArenaHistory({ mode: historyFilter === 'all' ? null : historyFilter })
+            .then(setHistory)
+            .catch(() => setToast({ type: 'error', message: 'Không tải được lịch sử' }))
+            .finally(() => setHistoryLoading(false));
+    }, [tab, historyFilter]);
+
+    /** Mở chi tiết một trận (đề đầy đủ + kết quả) */
+    const openDetail = async (sessionId) => {
+        try {
+            const data = await getArenaSessionDetail(sessionId);
+            if (!data) {
+                setToast({ type: 'error', message: 'Không tìm thấy trận này' });
+                return;
+            }
+            setDetail(data);
+        } catch {
+            setToast({ type: 'error', message: 'Không mở được chi tiết trận' });
+        }
+    };
+
     const handleCreate = async () => {
         if (!form.title.trim()) {
             setToast({ type: 'error', message: 'Vui lòng nhập tên phòng' });
@@ -110,6 +210,7 @@ export default function AdminArena() {
                 folderName: folder?.name || '',
                 grade: form.grade ? Number(form.grade) : null,
                 allowStudentHost: form.allowStudentHost,
+                mode: form.mode,
             });
 
             if (!res.ok) {
@@ -121,8 +222,20 @@ export default function AdminArena() {
                 return;
             }
 
-            setToast({ type: 'success', message: 'Đã mở phòng!' });
-            setForm({ title: '', folderId: '', grade: '', allowStudentHost: false });
+            setToast({
+                type: 'success',
+                message:
+                    form.mode === ARENA_MODE.PRACTICE
+                        ? 'Đã mở phòng luyện tập! Học sinh vào lúc nào cũng được.'
+                        : 'Đã mở phòng thi đấu!',
+            });
+            setForm({
+                title: '',
+                folderId: '',
+                grade: '',
+                allowStudentHost: false,
+                mode: form.mode,
+            });
         } catch (error) {
             setToast({ type: 'error', message: error.message || 'Không mở được phòng' });
         } finally {
@@ -191,6 +304,7 @@ export default function AdminArena() {
             <div className="flex gap-2 mb-5">
                 {[
                     { key: 'rooms', label: 'Phòng đấu', icon: 'meeting_room' },
+                    { key: 'history', label: 'Lịch sử', icon: 'history' },
                     { key: 'settings', label: 'Cài đặt', icon: 'settings' },
                 ].map((t) => (
                     <button
@@ -214,6 +328,47 @@ export default function AdminArena() {
                     {/* Mở phòng mới */}
                     <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <h2 className="font-bold text-gray-900 dark:text-white mb-3">Mở phòng mới</h2>
+
+                        {/* Chọn chế độ TRƯỚC, vì nó đổi ý nghĩa của các ô bên dưới */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+                            {[
+                                {
+                                    key: ARENA_MODE.LIVE,
+                                    icon: 'groups',
+                                    title: 'Thi đấu trực tiếp',
+                                    desc: 'Cả phòng thi cùng lúc. Chờ đủ người rồi chủ phòng bấm bắt đầu. Top 5 nhận thưởng theo hạng.',
+                                },
+                                {
+                                    key: ARENA_MODE.PRACTICE,
+                                    icon: 'self_improvement',
+                                    title: 'Luyện tập ở nhà',
+                                    desc: 'Phòng mở thường trực. HS vào lúc nào cũng được, làm một mình với đề random. Được mấy điểm cộng bấy nhiêu điểm tích luỹ.',
+                                },
+                            ].map((m) => (
+                                <button
+                                    key={m.key}
+                                    type="button"
+                                    onClick={() => setForm({ ...form, mode: m.key })}
+                                    className={`p-3 rounded-lg text-left border-2 transition-colors ${
+                                        form.mode === m.key
+                                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10'
+                                            : 'border-gray-200 dark:border-gray-600 hover:border-blue-300'
+                                    }`}
+                                >
+                                    <p className="flex items-center gap-1.5 font-bold text-gray-900 dark:text-white">
+                                        <Icon
+                                            name={m.icon}
+                                            size={18}
+                                            className={form.mode === m.key ? 'text-blue-500' : 'text-gray-400'}
+                                        />
+                                        {m.title}
+                                    </p>
+                                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        {m.desc}
+                                    </p>
+                                </button>
+                            ))}
+                        </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="sm:col-span-2">
@@ -281,17 +436,32 @@ export default function AdminArena() {
                             </div>
                         )}
 
-                        <label className="flex items-center gap-2 mt-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={form.allowStudentHost}
-                                onChange={(e) => setForm({ ...form, allowStudentHost: e.target.checked })}
-                                className="size-4 rounded"
-                            />
-                            <span className="text-sm text-gray-700 dark:text-gray-300">
-                                Cho học sinh tự bắt đầu (HS vào đầu tiên làm chủ phòng — chơi được ngoài giờ)
-                            </span>
-                        </label>
+                        {/* Phòng luyện tập không có chủ phòng — ai vào cũng tự làm bài ngay */}
+                        {form.mode === ARENA_MODE.LIVE && (
+                            <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={form.allowStudentHost}
+                                    onChange={(e) =>
+                                        setForm({ ...form, allowStudentHost: e.target.checked })
+                                    }
+                                    className="size-4 rounded"
+                                />
+                                <span className="text-sm text-gray-700 dark:text-gray-300">
+                                    Cho học sinh tự bắt đầu (HS vào đầu tiên làm chủ phòng — chơi được ngoài giờ)
+                                </span>
+                            </label>
+                        )}
+
+                        {form.mode === ARENA_MODE.PRACTICE && (
+                            <div className="mt-3 p-3 rounded-lg bg-sky-50 dark:bg-sky-500/10 text-sm text-sky-800 dark:text-sky-300">
+                                <Icon name="info" size={16} className="inline mr-1 align-text-bottom" />
+                                Phòng luyện tập mở thường trực: không cần đủ người, không có chủ phòng.
+                                Mỗi HS vào là nhận một đề random riêng, làm xong xem được đáp án ngay.
+                                Giới hạn <b>{settings.practiceMaxPerDay || 'không giới hạn'}</b> lượt/ngày
+                                (sửa ở tab Cài đặt).
+                            </div>
+                        )}
 
                         <Button
                             variant="primary"
@@ -333,15 +503,21 @@ export default function AdminArena() {
                                             </p>
                                         </div>
 
-                                        <span
-                                            className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                                                room.status === 'running'
-                                                    ? 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300'
-                                                    : 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-300'
-                                            }`}
-                                        >
-                                            {room.status === 'running' ? 'Đang đấu' : 'Đang chờ'}
-                                        </span>
+                                        {room.mode === ARENA_MODE.PRACTICE ? (
+                                            <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300">
+                                                Luyện tập
+                                            </span>
+                                        ) : (
+                                            <span
+                                                className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                                                    room.status === 'running'
+                                                        ? 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300'
+                                                        : 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-300'
+                                                }`}
+                                            >
+                                                {room.status === 'running' ? 'Đang đấu' : 'Đang chờ'}
+                                            </span>
+                                        )}
 
                                         <div className="flex gap-1.5">
                                             <Button
@@ -380,6 +556,7 @@ export default function AdminArena() {
                                                 <ArenaSpectator
                                                     roomId={room.id}
                                                     onToast={setToast}
+                                                    onOpenDetail={openDetail}
                                                 />
                                             </div>
                                         )}
@@ -391,11 +568,114 @@ export default function AdminArena() {
                 </div>
             )}
 
+            {/* ===== TAB LỊCH SỬ ===== */}
+            {tab === 'history' && (
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                        <h2 className="font-bold text-gray-900 dark:text-white">
+                            Lịch sử ({history.length})
+                        </h2>
+                        <div className="ml-auto flex gap-1">
+                            {[
+                                { key: 'all', label: 'Tất cả' },
+                                { key: 'live', label: 'Thi đấu' },
+                                { key: 'practice', label: 'Luyện tập' },
+                            ].map((f) => (
+                                <button
+                                    key={f.key}
+                                    onClick={() => setHistoryFilter(f.key)}
+                                    className={`px-3 py-1 rounded-lg text-sm font-semibold transition-colors ${
+                                        historyFilter === f.key
+                                            ? 'bg-blue-500 text-white'
+                                            : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                                    }`}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {historyLoading ? (
+                        <p className="py-8 text-center text-gray-500 dark:text-gray-400">
+                            <Icon name="progress_activity" size={20} className="inline animate-spin mr-1" />
+                            Đang tải...
+                        </p>
+                    ) : history.length === 0 ? (
+                        <p className="py-8 text-center text-gray-500 dark:text-gray-400">
+                            Chưa có trận nào
+                        </p>
+                    ) : (
+                        <div className="space-y-1.5">
+                            {history.map((h) => {
+                                const top = (h.ranking || [])[0];
+                                const isPractice = h.mode === 'practice';
+                                return (
+                                    <button
+                                        key={h.id}
+                                        onClick={() => openDetail(h.id)}
+                                        className="w-full flex flex-wrap items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 hover:bg-blue-50 dark:hover:bg-blue-500/10 text-left transition-colors"
+                                    >
+                                        <span
+                                            className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-bold ${
+                                                isPractice
+                                                    ? 'bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300'
+                                                    : 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300'
+                                            }`}
+                                        >
+                                            {isPractice ? 'Luyện tập' : 'Thi đấu'}
+                                        </span>
+
+                                        <div className="flex-1 min-w-[160px]">
+                                            <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                                                {formatHistoryDate(h.createdAt)}
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                {h.playerCount || 0} thí sinh · {(h.questions || []).length} câu
+                                                {isPractice && h.practiceResult && (
+                                                    <> · {h.practiceResult.score}/{h.practiceResult.maxScore}đ</>
+                                                )}
+                                                {!isPractice && top && (
+                                                    <> · Nhất: {top.name || 'HS'} ({top.score}đ)</>
+                                                )}
+                                            </p>
+                                        </div>
+
+                                        {h.status === 'running' && (
+                                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 text-xs font-bold animate-pulse">
+                                                Đang chạy
+                                            </span>
+                                        )}
+                                        <Icon
+                                            name="chevron_right"
+                                            size={18}
+                                            className="shrink-0 text-gray-400"
+                                        />
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* ===== TAB CÀI ĐẶT ===== */}
             {tab === 'settings' && (
                 <div className="space-y-5">
                     <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <h2 className="font-bold text-gray-900 dark:text-white mb-3">Luật chơi</h2>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+                            {TIME_FIELDS.map((f) => (
+                                <TimeField
+                                    key={f.key}
+                                    label={f.label}
+                                    value={settings[f.key]}
+                                    min={f.min}
+                                    onChange={(v) => setSettingValue(f.key, v)}
+                                />
+                            ))}
+                        </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                             {SETTINGS_FIELDS.map((f) => (
@@ -487,6 +767,10 @@ export default function AdminArena() {
                 </div>
             )}
 
+            {detail && (
+                <ArenaSessionDetail session={detail} onClose={() => setDetail(null)} />
+            )}
+
             {toast && (
                 <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
             )}
@@ -498,7 +782,7 @@ export default function AdminArena() {
 /**
  * Khán đài: xem ai đang trong phòng, và dừng trận nếu bị treo.
  */
-function ArenaSpectator({ roomId, onToast }) {
+function ArenaSpectator({ roomId, onToast, onOpenDetail }) {
     const [room, setRoom] = useState(null);
 
     useEffect(() => {
@@ -515,19 +799,46 @@ function ArenaSpectator({ roomId, onToast }) {
         }
     };
 
+    const handleReopen = async () => {
+        try {
+            await reopenArenaRoom(roomId);
+            onToast?.({ type: 'success', message: 'Đã mở lại phòng, sẵn sàng cho lượt mới' });
+        } catch {
+            onToast?.({ type: 'error', message: 'Không mở lại được phòng' });
+        }
+    };
+
     const players = Object.entries(room?.players || {});
+    const onlineCount = players.filter(([, p]) => p.online !== false).length;
 
     return (
         <div className="mt-2 p-3 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between gap-2 mb-2">
                 <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    Trong phòng ({players.length})
+                    Trong phòng: {onlineCount} đang kết nối
+                    {players.length !== onlineCount && ` / ${players.length} đã vào`}
                 </span>
-                {room?.status === 'running' && (
-                    <Button variant="ghost" size="sm" icon="stop_circle" onClick={handleForceFinish}>
-                        Dừng trận
+                <div className="flex gap-1">
+                    {/* Xem trước đề của trận đang chạy, để kịp chuẩn bị giảng lại */}
+                    {room?.status === 'running' && room?.sessionId && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            icon="quiz"
+                            onClick={() => onOpenDetail?.(room.sessionId)}
+                        >
+                            Xem đề
+                        </Button>
+                    )}
+                    {room?.status === 'running' && (
+                        <Button variant="ghost" size="sm" icon="stop_circle" onClick={handleForceFinish}>
+                            Dừng trận
+                        </Button>
+                    )}
+                    <Button variant="ghost" size="sm" icon="restart_alt" onClick={handleReopen}>
+                        Mở lại phòng
                     </Button>
-                )}
+                </div>
             </div>
 
             <div className="flex flex-wrap gap-2">

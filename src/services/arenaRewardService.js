@@ -82,6 +82,58 @@ export const requestArenaHint = async (sessionId, qIndex, effect, statementIndex
 };
 
 /**
+ * Bắt đầu một lượt luyện tập một mình.
+ *
+ * @param {string} roomId
+ * @returns {Promise<{ sessionId: string, totalQuestions: number, usedToday: number, maxPerDay: number }>}
+ */
+export const startArenaPractice = async (roomId) => {
+    return await callMoneyFunction('startArenaPractice', { roomId });
+};
+
+/**
+ * Chấm lượt luyện tập, cộng điểm tích luỹ và lấy phần xem lại đáp án.
+ *
+ * Điểm tích luỹ bằng đúng điểm bài làm (được 5đ thì cộng 5đ), chung trần ngày
+ * với thi đấu. Server idempotent nên gọi lại không cộng điểm hai lần.
+ *
+ * @param {string} sessionId
+ * @returns {Promise<{ score: number, maxScore: number, points: number, capped: boolean, review: Array }>}
+ */
+export const finalizeArenaPractice = async (sessionId, { retries = 3, delayMs = 1000 } = {}) => {
+    let lastError;
+
+    for (let i = 0; i <= retries; i++) {
+        try {
+            return await callMoneyFunction('finalizeArenaPractice', { sessionId });
+        } catch (error) {
+            lastError = error;
+            if (error.message?.includes('chưa kết thúc') && i < retries) {
+                await new Promise((r) => setTimeout(r, delayMs));
+                continue;
+            }
+            throw error;
+        }
+    }
+
+    throw lastError;
+};
+
+/**
+ * Dọn phòng bị bỏ hoang (cả phòng đã thoát giữa trận).
+ *
+ * Phải chạy server-side vì học sinh không có quyền ghi `status` của phòng.
+ * Server tự kiểm tra phòng thực sự trống trước khi dọn, nên gọi nhầm lúc trận
+ * còn đang chạy cũng không ảnh hưởng ai.
+ *
+ * @param {string} roomId
+ * @returns {Promise<{ cleaned: boolean, reason?: string }>}
+ */
+export const cleanupArenaRoom = async (roomId) => {
+    return await callMoneyFunction('cleanupArenaRoom', { roomId });
+};
+
+/**
  * Nhận điểm tích luỹ sau trận.
  *
  * Server tự đọc bảng xếp hạng để xác minh thứ hạng, và tự áp trần điểm mỗi
