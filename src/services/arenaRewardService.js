@@ -120,6 +120,20 @@ export const finalizeArenaPractice = async (sessionId, { retries = 3, delayMs = 
 };
 
 /**
+ * Xoá lịch sử trận (chỉ admin).
+ *
+ * Mỗi trận lưu cả bộ đề nên dữ liệu phình nhanh; hàm này để admin dọn bớt.
+ * Truyền `sessionIds` để xoá đúng các trận đã chọn, hoặc `olderThanDays` để
+ * xoá mọi trận cũ hơn ngần ấy ngày. Trận đang chạy luôn được giữ lại.
+ *
+ * @param {{ sessionIds?: string[], olderThanDays?: number }} params
+ * @returns {Promise<{ deleted: number, skippedRunning: number }>}
+ */
+export const deleteArenaHistory = async (params) => {
+    return await callMoneyFunction('deleteArenaHistory', params);
+};
+
+/**
  * Dọn phòng bị bỏ hoang (cả phòng đã thoát giữa trận).
  *
  * Phải chạy server-side vì học sinh không có quyền ghi `status` của phòng.

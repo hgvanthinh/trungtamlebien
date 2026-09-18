@@ -1137,15 +1137,18 @@ const toArenaQuestionServer = (q, index, cfg) => {
             alternativeAnswers: q.alternativeAnswers || [],
         };
     }
-    // abcd — xáo đáp án để mỗi trận vị trí đáp án đúng khác nhau
+    // abcd — GIỮ NGUYÊN thứ tự đáp án như admin đã nhập.
+    //
+    // Trước đây có xáo để mỗi trận vị trí đáp án đúng một khác, nhưng nhiều câu
+    // có đề nằm trong ẢNH cố định ("chọn hình A", "đáp án B ở trên")—xáo xong
+    // thì nhãn A/B/C/D không còn khớp với ảnh, học sinh không đọc được đề.
+    // Việc chống nhìn bài đã có cơ chế khác lo: mỗi trận random một bộ câu khác.
     return {
         ...base,
-        answers: shuffleArena(
-            (q.answers || []).map((a, i) => ({
-                text: (a.text || '').trim() || String.fromCharCode(65 + i),
-                isCorrect: !!a.isCorrect,
-            }))
-        ),
+        answers: (q.answers || []).map((a, i) => ({
+            text: (a.text || '').trim() || String.fromCharCode(65 + i),
+            isCorrect: !!a.isCorrect,
+        })),
     };
 };
 
@@ -1444,11 +1447,15 @@ const buildPracticeReview = (questions, answers) => {
             };
         }
         if (q.type === 'short_answer') {
+            // KHÔNG trả đáp án câu điền, kể cả sau khi đã chấm.
+            //
+            // Câu điền là dạng dễ tra Google nhất: lộ đáp án ở màn xem lại thì
+            // học sinh chỉ cần luyện một lượt là có sẵn đáp án cho các lượt sau
+            // (và cho bạn cùng lớp). Chỉ cho biết mình đúng hay sai.
             return {
                 ...base,
-                correctAnswer: q.correctAnswer || '',
-                alternativeAnswers: q.alternativeAnswers || [],
                 given: ans?.text ?? '',
+                answerHidden: true,
             };
         }
         return {
@@ -1638,11 +1645,27 @@ exports.finalizeArenaMatch = moneyFunction(async ({ uid, body, db }) => {
             totalMs += ans && Number.isFinite(raw) ? Math.min(Math.max(raw, 0), maxMs) : maxMs;
         });
 
+        // Gom cờ chống gian lận của câu cuối cùng có ghi nhận — client gửi số
+        // luỹ kế nên bản ghi mới nhất là tổng của cả trận.
+        let flags = null;
+        for (let i = questions.length - 1; i >= 0; i--) {
+            const f = playerAnswers[i]?.flags;
+            if (f) {
+                flags = {
+                    tabSwitches: Number(f.tabSwitches) || 0,
+                    screenshots: Number(f.screenshots) || 0,
+                    awayMs: Number(f.awayMs) || 0,
+                };
+                break;
+            }
+        }
+
         return {
             uid: playerUid,
             name: session.playerNames?.[playerUid] || '',
             score: Math.round(score * 100) / 100,
             totalMs,
+            ...(flags && (flags.tabSwitches || flags.screenshots) ? { flags } : {}),
         };
     });
 
@@ -1706,6 +1729,85 @@ const resetArenaRoomAfterMatch = async (rtdb, roomId) => {
         // Phòng đã bị gỡ khỏi danh sách công khai — không sao
     }
 };
+
+/**
+ * Xoá lịch sử trận Đấu Trường (CHỈ ADMIN).
+ *
+ * Mỗi trận lưu cả bộ đề trong doc, nên vài trăm trận là Firestore phình nhanh.
+ * Hàm này cho admin dọn bớt theo hai cách:
+ * - `sessionIds`: xoá đúng những trận được chọn.
+ * - `olderThanDays`: xoá mọi trận cũ hơn ngần ấy ngày.
+ *
+ * Xoá luôn dữ liệu RTDB và các bản ghi nhận thưởng đi kèm, để không còn rác
+ * trỏ tới trận đã biến mất. KHÔNG hoàn tác được.
+ *
+ * Client gửi: { sessionIds?: string[], olderThanDays?: number }
+ */
+exports.deleteArenaHistory = moneyFunction(async ({ email, body, db }) => {
+    if (email !== ADMIN_EMAIL) throw new Error('Chỉ admin mới xoá được lịch sử');
+
+    const { sessionIds, olderThanDays } = body;
+    const rtdb = admin.database();
+
+    let targets = [];
+
+    if (Array.isArray(sessionIds) && sessionIds.length) {
+        // Giới hạn mỗi lượt để không chạm trần thời gian chạy của function
+        targets = sessionIds.slice(0, 200).map(String);
+    } else if (Number(olderThanDays) > 0) {
+        const cutoff = new Date(Date.now() - Number(olderThanDays) * 86400000);
+        const snap = await db
+            .collection('arenaSessions')
+            .where('createdAt', '<', cutoff)
+            .limit(200)
+            .get();
+        targets = snap.docs.map((d) => d.id);
+    } else {
+        throw new Error('Cần chọn trận cần xoá hoặc số ngày');
+    }
+
+    if (!targets.length) return { deleted: 0 };
+
+    // Không xoá trận ĐANG CHẠY — học sinh còn đang làm bài trên đó
+    const running = new Set();
+    await Promise.all(
+        targets.map(async (id) => {
+            const d = await db.doc(`arenaSessions/${id}`).get();
+            if (d.exists && d.data().status === 'running') running.add(id);
+        })
+    );
+    const deletable = targets.filter((id) => !running.has(id));
+
+    let deleted = 0;
+    // Chia lô để mỗi batch không vượt giới hạn 500 thao tác của Firestore
+    for (let i = 0; i < deletable.length; i += 100) {
+        const chunk = deletable.slice(i, i + 100);
+        const batch = db.batch();
+
+        chunk.forEach((id) => {
+            batch.delete(db.doc(`arenaSessions/${id}`));
+        });
+
+        // Bản ghi nhận thưởng dùng docId dạng {sessionId}_{uid}
+        await Promise.all(
+            chunk.map(async (id) => {
+                const claims = await db
+                    .collection('arenaRewardClaims')
+                    .where('sessionId', '==', id)
+                    .get();
+                claims.docs.forEach((c) => batch.delete(c.ref));
+            })
+        );
+
+        await batch.commit();
+        await Promise.all(
+            chunk.map((id) => rtdb.ref(`arena_sessions/${id}`).remove().catch(() => {}))
+        );
+        deleted += chunk.length;
+    }
+
+    return { deleted, skippedRunning: running.size };
+});
 
 /**
  * Dọn một phòng Đấu Trường bị bỏ hoang.

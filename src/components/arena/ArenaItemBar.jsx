@@ -43,7 +43,26 @@ export default function ArenaItemBar({
     const [showStatementPicker, setShowStatementPicker] = useState(false);
 
     const ownedEffects = ORDER.filter((e) => owned[e]);
-    if (ownedEffects.length === 0) return null;
+
+    // KHÔNG ẩn thanh khi chưa có vật phẩm nào. Trước đây `return null` ở đây làm
+    // cả khu vực biến mất, nên học sinh tưởng tính năng hỏng thay vì hiểu rằng
+    // mình chưa sở hữu viền nào có gắn hiệu ứng.
+    if (ownedEffects.length === 0) {
+        return (
+            <div className="clay-card p-3">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                    <Icon name="backpack" size={18} className="text-[#556958] dark:text-[#a5b5a8]" />
+                    <span className="text-sm font-extrabold text-[#111812] dark:text-white">
+                        Vật phẩm
+                    </span>
+                </div>
+                <p className="text-xs text-[#556958] dark:text-[#a5b5a8]">
+                    Bạn chưa có vật phẩm nào. Mua <b>viền avatar có hiệu ứng</b> ở Cửa Hàng để
+                    dùng được ❄️ Đóng băng, ⚡ Nhân đôi điểm, 50/50... trong trận.
+                </p>
+            </div>
+        );
+    }
 
     /**
      * Vì sao vật phẩm này chưa dùng được? null = dùng được.

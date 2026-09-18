@@ -12,19 +12,19 @@ const STORAGE_KEY = 'arenaDisplayPrefs';
 
 /** Bậc cỡ chữ — nhân vào cỡ gốc của đề và đáp án */
 export const FONT_SCALES = [
-    { value: 0.9, label: 'Nhỏ', short: 'A' },
     { value: 1, label: 'Vừa', short: 'A' },
-    { value: 1.15, label: 'Lớn', short: 'A' },
-    { value: 1.35, label: 'Rất lớn', short: 'A' },
-    { value: 1.6, label: 'Cực lớn', short: 'A' },
+    { value: 1.25, label: 'Lớn', short: 'A' },
+    { value: 1.5, label: 'Rất lớn', short: 'A' },
+    { value: 1.9, label: 'Cực lớn', short: 'A' },
+    { value: 2.4, label: 'Siêu lớn', short: 'A' },
 ];
 
 /** Bậc chiều cao tối đa của ảnh đề (px) */
 export const IMAGE_SCALES = [
-    { value: 120, label: 'Nhỏ' },
     { value: 192, label: 'Vừa' },
-    { value: 280, label: 'Lớn' },
-    { value: 400, label: 'Rất lớn' },
+    { value: 320, label: 'Lớn' },
+    { value: 480, label: 'Rất lớn' },
+    { value: 700, label: 'Cực lớn' },
     { value: 9999, label: 'Tối đa' },
 ];
 

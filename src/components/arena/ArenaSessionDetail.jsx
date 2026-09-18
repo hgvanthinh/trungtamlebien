@@ -191,6 +191,25 @@ export default function ArenaSessionDetail({ session, onClose }) {
                                         <span className="flex-1 min-w-0 font-medium text-gray-900 dark:text-white truncate">
                                             {r.name || 'Học sinh'}
                                         </span>
+                                        {/* Cờ nghi vấn: rời màn hình / bấm PrintScreen */}
+                                        {r.flags && (
+                                            <span
+                                                title={`Rời màn hình ${r.flags.tabSwitches} lần${
+                                                    r.flags.awayMs
+                                                        ? ` (tổng ${Math.round(r.flags.awayMs / 1000)}s)`
+                                                        : ''
+                                                }${
+                                                    r.flags.screenshots
+                                                        ? ` · Chụp màn hình ${r.flags.screenshots} lần`
+                                                        : ''
+                                                }`}
+                                                className="shrink-0 flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-300 text-[11px] font-bold"
+                                            >
+                                                <Icon name="warning" size={12} />
+                                                {r.flags.tabSwitches > 0 && `${r.flags.tabSwitches}↗`}
+                                                {r.flags.screenshots > 0 && ` ${r.flags.screenshots}📷`}
+                                            </span>
+                                        )}
                                         <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">
                                             {formatTime(r.totalMs)}
                                         </span>

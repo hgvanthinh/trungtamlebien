@@ -22,9 +22,11 @@ import {
     getArenaHistory,
     getArenaSessionDetail,
 } from '../../services/arenaHistoryService';
+import { deleteArenaHistory } from '../../services/arenaRewardService';
 import ArenaSessionDetail from '../../components/arena/ArenaSessionDetail';
 import { getFolders } from '../../services/questionFolderService';
-import { ARENA_ITEM_EFFECTS } from '../../services/arenaItemService';
+import { getAllStoreItems } from '../../services/storeService';
+import { ARENA_ITEM_EFFECTS, ARENA_ITEM_CATEGORY } from '../../services/arenaItemService';
 import Button from '../../components/common/Button';
 import Icon from '../../components/common/Icon';
 import Toast from '../../components/common/Toast';
@@ -138,10 +140,15 @@ export default function AdminArena() {
     const [historyLoading, setHistoryLoading] = useState(false);
     const [historyFilter, setHistoryFilter] = useState('all');
     const [detail, setDetail] = useState(null);
+    const [selectedIds, setSelectedIds] = useState([]);
+    const [deleting, setDeleting] = useState(false);
 
     // Cài đặt
     const [settings, setSettings] = useState(DEFAULT_ARENA_SETTINGS);
     const [savingSettings, setSavingSettings] = useState(false);
+
+    // Viền avatar đã gán hiệu ứng — không có cái nào thì HS không có vật phẩm để dùng
+    const [effectBorders, setEffectBorders] = useState(null);
 
     // ===== Tải dữ liệu =====
     useEffect(() => {
@@ -149,6 +156,17 @@ export default function AdminArena() {
             .then(setFolders)
             .catch(() => setToast({ type: 'error', message: 'Không tải được thư mục đề' }));
         getArenaSettings(true).then(setSettings);
+
+        // Đếm xem có viền nào thực sự gán hiệu ứng chưa. Đây là nguyên nhân số
+        // một khiến học sinh "không dùng được vật phẩm": viền avatar không bắt
+        // buộc gán effect, nên kho có thể toàn viền trang trí.
+        getAllStoreItems()
+            .then((items) =>
+                setEffectBorders(
+                    items.filter((i) => i.category === ARENA_ITEM_CATEGORY && i.effect)
+                )
+            )
+            .catch(() => setEffectBorders([]));
     }, []);
 
     useEffect(() => {
@@ -175,6 +193,78 @@ export default function AdminArena() {
             .catch(() => setToast({ type: 'error', message: 'Không tải được lịch sử' }))
             .finally(() => setHistoryLoading(false));
     }, [tab, historyFilter]);
+
+    const reloadHistory = async () => {
+        setHistoryLoading(true);
+        try {
+            const data = await getArenaHistory({
+                mode: historyFilter === 'all' ? null : historyFilter,
+            });
+            setHistory(data);
+            setSelectedIds([]);
+        } catch {
+            setToast({ type: 'error', message: 'Không tải được lịch sử' });
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
+
+    const toggleSelect = (id) => {
+        setSelectedIds((prev) =>
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
+    };
+
+    /** Xoá các trận đã tick chọn */
+    const handleDeleteSelected = () => {
+        if (!selectedIds.length) return;
+        showConfirm({
+            title: `Xoá ${selectedIds.length} trận`,
+            message: 'Xoá hẳn đề, kết quả và bản ghi thưởng của các trận này. Không thể hoàn tác.',
+            onConfirm: async () => {
+                setDeleting(true);
+                try {
+                    const res = await deleteArenaHistory({ sessionIds: selectedIds });
+                    setToast({
+                        type: 'success',
+                        message: `Đã xoá ${res.deleted} trận${
+                            res.skippedRunning ? ` (giữ lại ${res.skippedRunning} trận đang chạy)` : ''
+                        }`,
+                    });
+                    await reloadHistory();
+                } catch (error) {
+                    setToast({ type: 'error', message: error.message || 'Không xoá được' });
+                } finally {
+                    setDeleting(false);
+                }
+            },
+        });
+    };
+
+    /** Xoá mọi trận cũ hơn N ngày */
+    const handleDeleteOlder = (days) => {
+        showConfirm({
+            title: `Xoá trận cũ hơn ${days} ngày`,
+            message: 'Dọn bớt cho nhẹ dữ liệu. Trận đang chạy vẫn được giữ. Không thể hoàn tác.',
+            onConfirm: async () => {
+                setDeleting(true);
+                try {
+                    const res = await deleteArenaHistory({ olderThanDays: days });
+                    setToast({
+                        type: res.deleted ? 'success' : 'info',
+                        message: res.deleted
+                            ? `Đã xoá ${res.deleted} trận cũ`
+                            : 'Không có trận nào đủ cũ để xoá',
+                    });
+                    await reloadHistory();
+                } catch (error) {
+                    setToast({ type: 'error', message: error.message || 'Không xoá được' });
+                } finally {
+                    setDeleting(false);
+                }
+            },
+        });
+    };
 
     /** Mở chi tiết một trận (đề đầy đủ + kết quả) */
     const openDetail = async (sessionId) => {
@@ -596,6 +686,46 @@ export default function AdminArena() {
                         </div>
                     </div>
 
+                    {/* Dọn bớt cho nhẹ dữ liệu — mỗi trận lưu cả bộ đề */}
+                    <div className="flex flex-wrap items-center gap-2 mb-3 pb-3 border-b border-gray-200 dark:border-gray-700">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            icon="delete"
+                            disabled={!selectedIds.length || deleting}
+                            onClick={handleDeleteSelected}
+                            className="text-red-500"
+                        >
+                            Xoá mục chọn{selectedIds.length ? ` (${selectedIds.length})` : ''}
+                        </Button>
+                        <span className="text-xs text-gray-400">|</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">Xoá trận cũ hơn:</span>
+                        {[7, 30, 90].map((d) => (
+                            <button
+                                key={d}
+                                disabled={deleting}
+                                onClick={() => handleDeleteOlder(d)}
+                                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-red-100 dark:hover:bg-red-500/20 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 transition-colors"
+                            >
+                                {d} ngày
+                            </button>
+                        ))}
+                        {history.length > 0 && (
+                            <button
+                                onClick={() =>
+                                    setSelectedIds(
+                                        selectedIds.length === history.length
+                                            ? []
+                                            : history.map((h) => h.id)
+                                    )
+                                }
+                                className="ml-auto text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                                {selectedIds.length === history.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                            </button>
+                        )}
+                    </div>
+
                     {historyLoading ? (
                         <p className="py-8 text-center text-gray-500 dark:text-gray-400">
                             <Icon name="progress_activity" size={20} className="inline animate-spin mr-1" />
@@ -611,11 +741,21 @@ export default function AdminArena() {
                                 const top = (h.ranking || [])[0];
                                 const isPractice = h.mode === 'practice';
                                 return (
-                                    <button
+                                    <div
                                         key={h.id}
-                                        onClick={() => openDetail(h.id)}
-                                        className="w-full flex flex-wrap items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 hover:bg-blue-50 dark:hover:bg-blue-500/10 text-left transition-colors"
+                                        className={`flex flex-wrap items-center gap-2 p-3 rounded-lg transition-colors ${
+                                            selectedIds.includes(h.id)
+                                                ? 'bg-red-50 dark:bg-red-500/10'
+                                                : 'bg-gray-50 dark:bg-gray-700/50'
+                                        }`}
                                     >
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedIds.includes(h.id)}
+                                            onChange={() => toggleSelect(h.id)}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="shrink-0 size-4 rounded cursor-pointer"
+                                        />
                                         <span
                                             className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-bold ${
                                                 isPractice
@@ -626,7 +766,10 @@ export default function AdminArena() {
                                             {isPractice ? 'Luyện tập' : 'Thi đấu'}
                                         </span>
 
-                                        <div className="flex-1 min-w-[160px]">
+                                        <button
+                                            onClick={() => openDetail(h.id)}
+                                            className="flex-1 min-w-[160px] text-left"
+                                        >
                                             <p className="text-sm font-semibold text-gray-900 dark:text-white">
                                                 {formatHistoryDate(h.createdAt)}
                                             </p>
@@ -639,19 +782,21 @@ export default function AdminArena() {
                                                     <> · Nhất: {top.name || 'HS'} ({top.score}đ)</>
                                                 )}
                                             </p>
-                                        </div>
+                                        </button>
 
                                         {h.status === 'running' && (
                                             <span className="shrink-0 px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 text-xs font-bold animate-pulse">
                                                 Đang chạy
                                             </span>
                                         )}
-                                        <Icon
-                                            name="chevron_right"
-                                            size={18}
-                                            className="shrink-0 text-gray-400"
-                                        />
-                                    </button>
+                                        <button
+                                            onClick={() => openDetail(h.id)}
+                                            className="shrink-0 text-gray-400 hover:text-blue-500 transition-colors"
+                                            aria-label="Xem chi tiết"
+                                        >
+                                            <Icon name="chevron_right" size={18} />
+                                        </button>
+                                    </div>
                                 );
                             })}
                         </div>
@@ -728,6 +873,26 @@ export default function AdminArena() {
                     {/* Hướng dẫn vật phẩm */}
                     <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm">
                         <h2 className="font-bold text-gray-900 dark:text-white mb-1">Vật phẩm</h2>
+
+                        {effectBorders !== null && (
+                            effectBorders.length === 0 ? (
+                                <div className="mb-3 p-3 rounded-lg bg-red-50 dark:bg-red-500/10 text-sm text-red-700 dark:text-red-300">
+                                    <Icon name="error" size={16} className="inline mr-1 align-text-bottom" />
+                                    <b>Chưa có viền nào được gán hiệu ứng</b> — nên học sinh vào trận
+                                    sẽ không có vật phẩm nào để dùng. Vào{' '}
+                                    <b>Cửa Hàng → sửa một viền avatar → Hiệu ứng Đấu Trường</b> để gán.
+                                </div>
+                            ) : (
+                                <div className="mb-3 p-3 rounded-lg bg-green-50 dark:bg-green-500/10 text-sm text-green-700 dark:text-green-300">
+                                    <Icon name="check_circle" size={16} className="inline mr-1 align-text-bottom" />
+                                    Đang có <b>{effectBorders.length} viền</b> gắn hiệu ứng:{' '}
+                                    {effectBorders
+                                        .map((b) => `${b.name} (${ARENA_ITEM_EFFECTS[b.effect]?.label || b.effect})`)
+                                        .join(', ')}
+                                    . Học sinh phải <b>sở hữu viền</b> mới dùng được skill tương ứng.
+                                </div>
+                            )
+                        )}
                         <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
                             Vật phẩm chính là <b>viền avatar</b> trong Cửa Hàng. Vào{' '}
                             <b>Cửa Hàng → sửa viền → Hiệu ứng Đấu Trường</b> để gán. Học sinh sở hữu

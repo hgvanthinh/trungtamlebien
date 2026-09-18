@@ -7,6 +7,7 @@ import ArenaDisplaySettings from './ArenaDisplaySettings';
 import ArenaLiveBoard from './ArenaLiveBoard';
 import { useArenaPhase } from '../../hooks/useArenaPhase';
 import { useArenaDisplayPrefs } from '../../hooks/useArenaDisplayPrefs';
+import { useArenaAntiCheat } from '../../hooks/useArenaAntiCheat';
 import {
     getArenaQuestions,
     listenToArenaEffects,
@@ -57,6 +58,12 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
     // Cỡ chữ / cỡ ảnh do HS tự chỉnh, nhớ theo từng máy
     const { prefs, setFontScale, setImageMaxHeight, reset: resetPrefs } = useArenaDisplayPrefs();
 
+    // Giám sát gian lận. Bật trong suốt lúc làm bài; số lần vi phạm được gửi kèm
+    // mỗi câu trả lời để thầy cô xem lại được.
+    const antiCheat = useArenaAntiCheat({ enabled: true });
+    const antiCheatRef = useRef(antiCheat);
+    antiCheatRef.current = antiCheat;
+
     // Giữ bản mới nhất của bài đang soạn để hàm tự-nộp (chạy trong interval)
     // luôn đọc được giá trị hiện tại, không bị kẹt ở closure cũ.
     const draftRef = useRef({ choice: null, tf: {}, text: '' });
@@ -70,6 +77,8 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
     const submittedRef = useRef({});
     const [submitting, setSubmitting] = useState(false);
     const [skipping, setSkipping] = useState(false);
+    // Ảnh đang xem toàn màn hình (null = không mở)
+    const [zoomImage, setZoomImage] = useState(null);
 
     // doSubmit duoc gan lai moi lan render (ben duoi) de luon doc duoc
     // questionStart / serverNow moi nhat. Dung ref vi handleAutoSubmit chay
@@ -232,6 +241,13 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
         else payload.text = draft.text.trim();
 
         const elapsed = questionStart ? serverNow() - questionStart : 0;
+        // Gửi kèm số lần rời màn hình / bấm PrintScreen tính tới lúc nộp câu này
+        const ac = antiCheatRef.current;
+        payload.flags = {
+            tabSwitches: ac.blurCount,
+            screenshots: ac.screenshotCount,
+            awayMs: Math.round(ac.awayMs),
+        };
         await submitArenaAnswer(sessionId, uid, qIndex, payload, elapsed);
     };
     doSubmitRef.current = doSubmit;
@@ -450,6 +466,13 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
                         />
                     </div>
                 </div>
+                {antiCheat.totalViolations > 0 && (
+                    <p className="mb-2 text-xs font-bold text-red-600 dark:text-red-400 text-center">
+                        ⚠️ Đã ghi nhận {antiCheat.blurCount > 0 && `${antiCheat.blurCount} lần rời màn hình`}
+                        {antiCheat.blurCount > 0 && antiCheat.screenshotCount > 0 && ' · '}
+                        {antiCheat.screenshotCount > 0 && `${antiCheat.screenshotCount} lần chụp màn hình`}
+                    </p>
+                )}
                 {endedEarly && (
                     <p className="mb-2 text-xs font-bold text-amber-600 dark:text-amber-400 text-center">
                         ⚡ Cả phòng đã trả lời — qua câu sau {remainingSec}s. Muốn đổi đáp án thì làm ngay!
@@ -480,6 +503,22 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
                     </div>
                 )}
 
+                {/* Rời tab → che đề ngay. Không ngăn được việc chụp màn hình từ
+                    trước đó, nhưng chặn được kiểu mở tab tra Google rồi quay lại
+                    đọc tiếp, và mọi lần rời đi đều bị ghi lại. */}
+                {antiCheat.isAway && (
+                    <div className="absolute inset-0 z-20 rounded-[inherit] bg-red-50 dark:bg-red-950 flex flex-col items-center justify-center p-6 backdrop-blur-md">
+                        <Icon name="visibility_off" size={44} className="text-red-500 mb-2" />
+                        <p className="font-extrabold text-red-700 dark:text-red-300 text-center">
+                            Đề đã bị ẩn vì bạn rời khỏi màn hình
+                        </p>
+                        <p className="mt-1 text-xs text-red-600 dark:text-red-400 text-center">
+                            Quay lại tab này để làm tiếp. Đồng hồ vẫn chạy và thầy cô
+                            thấy được số lần rời đi.
+                        </p>
+                    </div>
+                )}
+
                 {phase === 'interstitial' ? (
                     <div className="py-8 flex flex-col items-center gap-2">
                         <Icon name="hourglass_bottom" size={36} className="text-primary animate-pulse" />
@@ -494,12 +533,23 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
                     <>
                         {question.questionImage && (
                             <div className="text-center mb-3">
-                                <img
-                                    src={question.questionImage}
-                                    alt=""
-                                    className="inline-block max-w-full rounded-xl"
-                                    style={{ maxHeight: `${prefs.imageMaxHeight}px` }}
-                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setZoomImage(question.questionImage)}
+                                    title="Bấm để phóng to ảnh"
+                                    className="relative inline-block max-w-full group"
+                                >
+                                    <img
+                                        src={question.questionImage}
+                                        alt=""
+                                        className="inline-block max-w-full rounded-xl"
+                                        style={{ maxHeight: `${prefs.imageMaxHeight}px` }}
+                                    />
+                                    <span className="absolute bottom-1.5 right-1.5 flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-black/60 text-white text-[10px] font-bold">
+                                        <Icon name="zoom_in" size={12} />
+                                        Phóng to
+                                    </span>
+                                </button>
                             </div>
                         )}
                         <MathText
@@ -709,6 +759,32 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
                     questionIndex={questionIndex}
                     myUid={uid}
                 />
+            )}
+
+            {/* Xem ảnh đề toàn màn hình — nhiều câu có đề nằm trong ảnh, thu nhỏ
+                trong khung thì học sinh không đọc nổi chữ số trong hình. */}
+            {zoomImage && (
+                <div
+                    className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-3"
+                    onClick={() => setZoomImage(null)}
+                >
+                    <img
+                        src={zoomImage}
+                        alt=""
+                        className="max-w-full max-h-full object-contain rounded-lg"
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                    <button
+                        onClick={() => setZoomImage(null)}
+                        aria-label="Đóng"
+                        className="absolute top-3 right-3 size-10 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors"
+                    >
+                        <Icon name="close" size={22} />
+                    </button>
+                    <p className="absolute bottom-4 left-0 right-0 text-center text-white/70 text-xs">
+                        Bấm nền để đóng · Chụm hai ngón để phóng to thêm
+                    </p>
+                </div>
             )}
         </div>
     );

@@ -8,8 +8,12 @@ import { finalizeArenaPractice } from '../../services/arenaRewardService';
  * Kết quả một lượt luyện tập + xem lại đáp án đúng.
  *
  * Khác bảng xếp hạng thi đấu: không có đối thủ, không xếp hạng. Điểm tích luỹ
- * bằng đúng điểm bài làm, và HS được xem mình sai câu nào, đáp án đúng là gì —
- * vì mục đích của chế độ này là học, không phải so kè.
+ * bằng đúng điểm bài làm, và HS được xem mình sai câu nào — vì mục đích của chế
+ * độ này là học, không phải so kè.
+ *
+ * NGOẠI LỆ: câu ĐIỀN ĐÁP ÁN chỉ báo đúng/sai, không hiện đáp án. Đó là dạng dễ
+ * tra mạng nhất; lộ đáp án ở đây là học sinh luyện một lượt rồi có sẵn đáp án
+ * cho các lượt sau. Server cũng không gửi đáp án câu điền về (`answerHidden`).
  */
 
 const ANSWER_LABELS = ['A', 'B', 'C', 'D'];
@@ -152,7 +156,9 @@ function ReviewItem({ item }) {
                 </div>
             )}
 
-            {/* Điền đáp án */}
+            {/* Điền đáp án — CHỈ báo đúng/sai, không lộ đáp án.
+                Đây là dạng dễ tra mạng nhất, lộ ra là học sinh có sẵn đáp án
+                cho lượt sau và cho cả bạn cùng lớp. */}
             {item.type === 'short_answer' && (
                 <div className="space-y-1.5 text-sm">
                     <div className="p-2 rounded-xl bg-white/60 dark:bg-white/5">
@@ -161,13 +167,22 @@ function ReviewItem({ item }) {
                             {item.given?.trim() || '(bỏ trống)'}
                         </b>
                     </div>
-                    <div className="p-2 rounded-xl bg-green-100 dark:bg-green-500/20">
-                        <span className="text-green-700 dark:text-green-300">Đáp án đúng: </span>
-                        <b className="text-green-800 dark:text-green-200">{item.correctAnswer}</b>
-                        {item.alternativeAnswers?.length > 0 && (
-                            <span className="text-xs text-green-700 dark:text-green-300">
-                                {' '}
-                                (hoặc: {item.alternativeAnswers.join(', ')})
+                    <div
+                        className={`p-2 rounded-xl ${
+                            isPerfect
+                                ? 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200'
+                                : 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200'
+                        }`}
+                    >
+                        <Icon
+                            name={isPerfect ? 'check_circle' : 'cancel'}
+                            size={15}
+                            className="inline mr-1 align-text-bottom"
+                        />
+                        <b>{isPerfect ? 'Chính xác!' : 'Chưa đúng'}</b>
+                        {!isPerfect && (
+                            <span className="ml-1 text-xs">
+                                — câu điền không hiện đáp án, em xem lại bài rồi thử lượt khác nhé.
                             </span>
                         )}
                     </div>

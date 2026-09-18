@@ -17,16 +17,47 @@ export default function ArenaDisplaySettings({
 }) {
     const [open, setOpen] = useState(false);
 
+    // Zoom nhanh: nhảy sang bậc kế tiếp trong danh sách, không nhân tự do — giữ
+    // cho cỡ chữ luôn là một trong các bậc đã cân chỉnh sẵn.
+    const currentStep = FONT_SCALES.findIndex((s) => s.value === prefs.fontScale);
+    const stepIndex = currentStep < 0 ? 0 : currentStep;
+    const canZoomIn = stepIndex < FONT_SCALES.length - 1;
+    const canZoomOut = stepIndex > 0;
+    const onZoomIn = () => canZoomIn && onFontScale(FONT_SCALES[stepIndex + 1].value);
+    const onZoomOut = () => canZoomOut && onFontScale(FONT_SCALES[stepIndex - 1].value);
+
     return (
         <>
-            <button
-                onClick={() => setOpen(true)}
-                title="Cỡ chữ và cỡ ảnh"
-                aria-label="Chỉnh cỡ chữ và cỡ ảnh"
-                className="shrink-0 size-8 rounded-full bg-[#f0f5f1] dark:bg-white/10 flex items-center justify-center text-[#556958] dark:text-[#a5b5a8] hover:bg-primary/15 hover:text-primary-dark dark:hover:text-primary transition-colors active:scale-95"
-            >
-                <Icon name="format_size" size={18} />
-            </button>
+            {/* Zoom nhanh +/- ngay trên thanh, không phải mở hộp thoại.
+                Nút cũ chỉ là một icon nhỏ nên học sinh không nhận ra có thể phóng to. */}
+            <div className="shrink-0 flex items-center gap-0.5 rounded-full bg-[#f0f5f1] dark:bg-white/10 p-0.5">
+                <button
+                    onClick={onZoomOut}
+                    disabled={!canZoomOut}
+                    title="Thu nhỏ chữ"
+                    aria-label="Thu nhỏ chữ"
+                    className="size-7 rounded-full flex items-center justify-center text-[#556958] dark:text-[#a5b5a8] hover:bg-white dark:hover:bg-white/10 disabled:opacity-30 transition-colors active:scale-95"
+                >
+                    <Icon name="zoom_out" size={17} />
+                </button>
+                <button
+                    onClick={onZoomIn}
+                    disabled={!canZoomIn}
+                    title="Phóng to chữ"
+                    aria-label="Phóng to chữ"
+                    className="size-7 rounded-full flex items-center justify-center text-[#556958] dark:text-[#a5b5a8] hover:bg-white dark:hover:bg-white/10 disabled:opacity-30 transition-colors active:scale-95"
+                >
+                    <Icon name="zoom_in" size={17} />
+                </button>
+                <button
+                    onClick={() => setOpen(true)}
+                    title="Cỡ chữ và cỡ ảnh"
+                    aria-label="Chỉnh cỡ chữ và cỡ ảnh"
+                    className="size-7 rounded-full flex items-center justify-center text-[#556958] dark:text-[#a5b5a8] hover:bg-white dark:hover:bg-white/10 transition-colors active:scale-95"
+                >
+                    <Icon name="tune" size={17} />
+                </button>
+            </div>
 
             {open && (
                 <div
