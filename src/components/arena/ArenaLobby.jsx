@@ -53,7 +53,7 @@ export default function ArenaLobby({ roomId, room, myUid, settings, onLeave, onT
             <div className="clay-card p-4">
                 <div className="flex items-start gap-3">
                     <span className="shrink-0 size-12 rounded-2xl bg-gradient-to-br from-primary to-primary-dark flex items-center justify-center">
-                        <Icon name="stadium" size={26} className="text-white" />
+                        <Icon name="swords" size={26} className="text-white" />
                     </span>
                     <div className="flex-1 min-w-0">
                         <h2 className="font-extrabold text-lg text-[#111812] dark:text-white truncate">

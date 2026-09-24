@@ -14,9 +14,9 @@ import { db } from '../config/firebase';
  * KHÁC VỚI ĐẤU TRÍ 1v1: vật phẩm arena chính là 5 VIỀN AVATAR trong cửa hàng
  * (`category: 'avatar-border'`). Viền là đồ sưu tầm vĩnh viễn nên:
  * - Sở hữu viền ⇒ mỗi trận được dùng skill tương ứng 1 LẦN
- * - KHÔNG tiêu hao viền (không có hàm consume như versusItemService)
+ * - KHÔNG tiêu hao viền
  *
- * Giống versus: inventoryService copy `itemCategory` vào doc inventory nhưng
+ * inventoryService copy `itemCategory` vào doc inventory nhưng
  * KHÔNG copy `effect`, nên phải đọc lại `storeItems/{itemId}` (có cache).
  */
 

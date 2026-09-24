@@ -213,7 +213,7 @@ export default function Arena() {
             {view === 'rooms' && (
                 <div className="text-center">
                     <h1 className="text-2xl font-black text-[#111812] dark:text-white flex items-center justify-center gap-2">
-                        <Icon name="stadium" size={28} className="text-primary" />
+                        <Icon name="swords" size={28} className="text-primary" />
                         Đấu Trường
                     </h1>
                     <p className="text-sm text-[#556958] dark:text-[#a5b5a8] mt-1">

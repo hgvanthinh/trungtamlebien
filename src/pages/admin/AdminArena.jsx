@@ -21,6 +21,7 @@ import {
 import {
     getArenaHistory,
     getArenaSessionDetail,
+    getSessionDisplayStatus,
 } from '../../services/arenaHistoryService';
 import { deleteArenaHistory } from '../../services/arenaRewardService';
 import ArenaSessionDetail from '../../components/arena/ArenaSessionDetail';
@@ -382,7 +383,7 @@ export default function AdminArena() {
         <div className="p-4 sm:p-6 max-w-5xl mx-auto">
             <div className="mb-5">
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                    <Icon name="stadium" size={28} className="text-blue-500" />
+                    <Icon name="swords" size={28} className="text-blue-500" />
                     Đấu Trường
                 </h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -784,9 +785,17 @@ export default function AdminArena() {
                                             </p>
                                         </button>
 
-                                        {h.status === 'running' && (
+                                        {getSessionDisplayStatus(h) === 'running' && (
                                             <span className="shrink-0 px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 text-xs font-bold animate-pulse">
                                                 Đang chạy
+                                            </span>
+                                        )}
+                                        {getSessionDisplayStatus(h) === 'abandoned' && (
+                                            <span
+                                                title="Trận không được chấm điểm vì cả phòng đã thoát hoặc phòng bị mở lại/đóng giữa chừng"
+                                                className="shrink-0 px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 text-xs font-bold"
+                                            >
+                                                Bỏ dở
                                             </span>
                                         )}
                                         <button

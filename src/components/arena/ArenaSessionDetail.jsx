@@ -1,6 +1,6 @@
 import Icon from '../common/Icon';
 import { MathText } from '../math';
-import { QUESTION_TYPE_LABELS, describeCorrectAnswer } from '../../services/arenaHistoryService';
+import { QUESTION_TYPE_LABELS, describeCorrectAnswer, getSessionDisplayStatus } from '../../services/arenaHistoryService';
 
 /**
  * Chi tiết một trận cho ADMIN: đề đầy đủ (có đáp án) + kết quả từng thí sinh.
@@ -124,18 +124,19 @@ function QuestionCard({ q, index }) {
 export default function ArenaSessionDetail({ session, onClose }) {
     if (!session) return null;
 
-    const isRunning = session.status === 'running';
+    const displayStatus = getSessionDisplayStatus(session);
+    const isRunning = displayStatus === 'running';
     const ranking = session.ranking || [];
     const questions = session.questions || [];
     const isPractice = session.mode === 'practice';
 
     return (
         <div
-            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-3"
             onClick={onClose}
         >
             <div
-                className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-3xl max-h-[88vh] overflow-y-auto shadow-xl"
+                className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-[96vw] h-[96vh] overflow-y-auto shadow-xl"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header dính, để cuộn dài vẫn đóng được */}
@@ -146,6 +147,11 @@ export default function ArenaSessionDetail({ session, onClose }) {
                             {isRunning && (
                                 <span className="px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 text-xs font-bold animate-pulse">
                                     Đang diễn ra
+                                </span>
+                            )}
+                            {displayStatus === 'abandoned' && (
+                                <span className="px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 text-xs font-bold">
+                                    Bỏ dở — không chấm điểm
                                 </span>
                             )}
                         </h3>

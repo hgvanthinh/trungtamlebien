@@ -61,6 +61,28 @@ export const getArenaSessionDetail = async (sessionId) => {
     return { id: snap.id, ...snap.data() };
 };
 
+// Một trận 5 câu kéo dài cỡ vài phút. Quá mốc này mà vẫn 'running' nghĩa là
+// trận đã bị bỏ dở (cả phòng thoát, admin mở lại/đóng/xoá phòng) và không còn
+// ai gọi finalize để chuyển sang 'finished'. Đồng bộ với functions/index.js.
+export const ARENA_STALE_MS = 30 * 60 * 1000;
+
+/**
+ * Trạng thái hiển thị của một trận trong lịch sử.
+ * @param {Object} session - doc arenaSessions
+ * @returns {'running'|'abandoned'|'finished'}
+ */
+export const getSessionDisplayStatus = (session) => {
+    if (!session) return 'finished';
+    if (session.status === 'abandoned') return 'abandoned';
+    if (session.status !== 'running') return 'finished';
+
+    const ts = session.createdAt;
+    const createdMs = ts?.toMillis ? ts.toMillis() : ts ? new Date(ts).getTime() : 0;
+    // createdAt null = serverTimestamp chưa về tới client → trận vừa tạo
+    if (createdMs && Date.now() - createdMs > ARENA_STALE_MS) return 'abandoned';
+    return 'running';
+};
+
 /**
  * Nhãn ngắn cho loại câu, dùng chung ở các bảng của admin.
  */

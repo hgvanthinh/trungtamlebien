@@ -865,51 +865,6 @@ exports.smashPiggy = moneyFunction(async ({ uid, db }) => {
 });
 
 /**
- * Nhận thưởng Xu sau khi thắng trận Đấu Trí.
- * Server đọc kết quả trận từ versusMatchResults để xác minh người gọi đúng là
- * người thắng, và chỉ trả thưởng MỘT LẦN cho mỗi trận (docId = sessionId).
- * Client gửi: { sessionId }
- */
-exports.claimVersusReward = moneyFunction(async ({ uid, body, db }) => {
-    const { sessionId } = body;
-    if (!sessionId) throw new Error('Thiếu mã trận đấu');
-
-    const settingsSnap = await db.doc('settings/versusGame').get();
-    const rawWin = settingsSnap.exists ? settingsSnap.data().winCoins : undefined;
-    const winCoins = Number(rawWin ?? 5) || 0;
-    if (winCoins <= 0) return { awarded: false, reason: 'no_reward_configured', coins: 0 };
-
-    // Đọc kết quả trận TRƯỚC transaction (query không dùng được bên trong)
-    const resultSnap = await db.collection('versusMatchResults')
-        .where('sessionId', '==', sessionId).limit(1).get();
-    if (resultSnap.empty) throw new Error('Không tìm thấy kết quả trận đấu');
-
-    const result = resultSnap.docs[0].data();
-    const winner = result.winnerUid || result.winnerId || result.winner;
-    if (!winner) throw new Error('Trận đấu chưa có người thắng');
-    if (winner !== uid) throw new Error('Bạn không phải người thắng trận này');
-    if (result.forceStopped) throw new Error('Trận đấu bị dừng, không có thưởng');
-
-    // docId = sessionId → chống nhận thưởng 2 lần cho cùng một trận
-    const claimRef = db.collection('versusRewardClaims').doc(sessionId);
-    const userRef = db.collection('users').doc(uid);
-
-    return await db.runTransaction(async (t) => {
-        const claimDoc = await t.get(claimRef);
-        if (claimDoc.exists) throw new Error('Trận này đã nhận thưởng rồi');
-
-        const userDoc = await t.get(userRef);
-        if (!userDoc.exists) throw new Error('Không tìm thấy thông tin người dùng');
-
-        const newCoins = (Number(userDoc.data().coins) || 0) + winCoins;
-        t.update(userRef, { coins: newCoins, updatedAt: nowStamp() });
-        t.set(claimRef, { sessionId, uid, coins: winCoins, createdAt: nowStamp() });
-
-        return { awarded: true, coins: winCoins, newCoins };
-    });
-});
-
-/**
  * Cộng XP cho heo khi HS nộp bài "Dạy heo học".
  *
  * Chạy server-side vì XP heo dẫn tới lượt đập heo (ra Đồng Vàng): nếu để
@@ -1730,6 +1685,10 @@ const resetArenaRoomAfterMatch = async (rtdb, roomId) => {
     }
 };
 
+// Trận 'running' lâu hơn mốc này là trận bỏ dở. Đồng bộ với
+// ARENA_STALE_MS trong src/services/arenaHistoryService.js.
+const ARENA_STALE_MS = 30 * 60 * 1000;
+
 /**
  * Xoá lịch sử trận Đấu Trường (CHỈ ADMIN).
  *
@@ -1768,12 +1727,15 @@ exports.deleteArenaHistory = moneyFunction(async ({ email, body, db }) => {
 
     if (!targets.length) return { deleted: 0 };
 
-    // Không xoá trận ĐANG CHẠY — học sinh còn đang làm bài trên đó
+    // Không xoá trận ĐANG CHẠY — học sinh còn đang làm bài trên đó.
+    // Trận 'running' quá ARENA_STALE_MS là trận bỏ dở (không ai chấm), xoá được.
     const running = new Set();
     await Promise.all(
         targets.map(async (id) => {
             const d = await db.doc(`arenaSessions/${id}`).get();
-            if (d.exists && d.data().status === 'running') running.add(id);
+            if (!d.exists || d.data().status !== 'running') return;
+            const createdMs = d.data().createdAt?.toMillis?.() || 0;
+            if (!createdMs || Date.now() - createdMs <= ARENA_STALE_MS) running.add(id);
         })
     );
     const deletable = targets.filter((id) => !running.has(id));
@@ -1822,7 +1784,7 @@ exports.deleteArenaHistory = moneyFunction(async ({ email, body, db }) => {
  *
  * Client gửi: { roomId }
  */
-exports.cleanupArenaRoom = moneyFunction(async ({ body }) => {
+exports.cleanupArenaRoom = moneyFunction(async ({ body, db }) => {
     const { roomId } = body;
     if (!roomId) throw new Error('Thiếu mã phòng');
 
@@ -1838,9 +1800,15 @@ exports.cleanupArenaRoom = moneyFunction(async ({ body }) => {
     ).length;
     if (onlineCount > 0) return { cleaned: false, reason: 'still_playing' };
 
-    // Trận đang dở mà không còn ai → đánh dấu đã kết thúc để không treo mãi
+    // Trận đang dở mà không còn ai → đánh dấu đã kết thúc để không treo mãi.
+    // Firestore cũng phải đổi, nếu không tab Lịch sử của admin báo "Đang chạy" mãi.
     if (room.sessionId) {
         await rtdb.ref(`arena_sessions/${room.sessionId}/meta/status`).set('finished').catch(() => {});
+        const sessionRef = db.doc(`arenaSessions/${room.sessionId}`);
+        const sessionSnap = await sessionRef.get().catch(() => null);
+        if (sessionSnap?.exists && sessionSnap.data().status === 'running') {
+            await sessionRef.update({ status: 'abandoned', abandonedAt: nowStamp() }).catch(() => {});
+        }
     }
 
     await resetArenaRoomAfterMatch(rtdb, roomId);

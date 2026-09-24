@@ -537,17 +537,19 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
                                     type="button"
                                     onClick={() => setZoomImage(question.questionImage)}
                                     title="Bấm để phóng to ảnh"
-                                    className="relative inline-block max-w-full group"
+                                    className="inline-flex flex-col items-end max-w-full group"
                                 >
                                     <img
                                         src={question.questionImage}
                                         alt=""
-                                        className="inline-block max-w-full rounded-xl"
+                                        className="block max-w-full rounded-xl"
                                         style={{ maxHeight: `${prefs.imageMaxHeight}px` }}
                                     />
-                                    <span className="absolute bottom-1.5 right-1.5 flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-black/60 text-white text-[10px] font-bold">
-                                        <Icon name="zoom_in" size={12} />
-                                        Phóng to
+                                    {/* Nhãn nằm DƯỚI ảnh, không đè lên ảnh — trước đây đặt absolute
+                                        ở góc ảnh nên che mất chữ của đề (vd đáp án D sát góc phải). */}
+                                    <span className="mt-1 flex items-center gap-0.5 text-[11px] font-bold text-[#556958] dark:text-[#a5b5a8] group-hover:text-primary">
+                                        <Icon name="zoom_in" size={14} />
+                                        Chạm vào ảnh để phóng to
                                     </span>
                                 </button>
                             </div>

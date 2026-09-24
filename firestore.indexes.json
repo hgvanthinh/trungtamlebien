@@ -93,20 +93,6 @@
       ]
     },
     {
-      "collectionGroup": "versusMatchResults",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "gameId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "arenaSessions",
       "queryScope": "COLLECTION",
       "fields": [

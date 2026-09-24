@@ -10,7 +10,6 @@ import {
     createStoreCategory
 } from '../../services/storeService';
 import { compressStoreImage } from '../../services/fileProcessingService';
-import { VERSUS_ITEM_EFFECTS } from '../../services/versusItemService';
 import { ARENA_ITEM_EFFECTS, ARENA_ITEM_CATEGORY } from '../../services/arenaItemService';
 import CoinIcon from '../../components/common/CoinIcon';
 import GoldIcon from '../../components/common/GoldIcon';
@@ -22,11 +21,8 @@ const CATEGORY_EMOJIS = [
     '⚽', '🎯', '💎', '🔥', '🌟', '🏆', '🎈', '🧩'
 ];
 
-// Category có field `effect`. Viền avatar dùng cho Đấu Trường, versus-item cho Đấu Trí 1v1.
-// Mỗi category tra bảng effect riêng — không dùng chung danh sách.
+// Category có field `effect` (hiện chỉ có viền avatar, dùng cho Đấu Trường).
 const EFFECT_OPTIONS_BY_CATEGORY = {
-    'versus-item': { label: '⚔️ Hiệu ứng Đấu Trí', effects: VERSUS_ITEM_EFFECTS, required: true,
-        hint: 'Vật phẩm dùng trong trận Đấu Trí 1v1. HS mua ở Cửa Hàng, dùng 1 lần rồi mất.' },
     [ARENA_ITEM_CATEGORY]: { label: '🏟️ Hiệu ứng Đấu Trường', effects: ARENA_ITEM_EFFECTS, required: false,
         hint: 'Để trống nếu viền chỉ để trang trí. Nếu gán hiệu ứng, HS sở hữu viền sẽ được dùng skill này 1 lần mỗi trận Đấu Trường (viền KHÔNG bị mất).' }
 };
@@ -155,7 +151,7 @@ export default function AdminStore() {
 
         const effectConfig = EFFECT_OPTIONS_BY_CATEGORY[formData.category];
         if (effectConfig?.required && !formData.effect) {
-            setToast({ type: 'error', message: 'Vui lòng chọn Hiệu ứng Đấu Trí cho vật phẩm' });
+            setToast({ type: 'error', message: 'Vui lòng chọn hiệu ứng cho vật phẩm' });
             return;
         }
 
@@ -180,7 +176,7 @@ export default function AdminStore() {
                 ...formData,
                 imageUrl,
                 price: Number(formData.price),
-                // effect chỉ có nghĩa với category có hiệu ứng (versus-item, avatar-border).
+                // effect chỉ có nghĩa với category có hiệu ứng (avatar-border).
                 // Category khác thì xoá để không sót effect cũ khi admin đổi category.
                 effect: effectConfig ? formData.effect : ''
             };
@@ -552,7 +548,7 @@ export default function AdminStore() {
                                     </div>
                                 </div>
 
-                                {/* Hiệu ứng — hiện với versus-item (Đấu Trí) và avatar-border (Đấu Trường) */}
+                                {/* Hiệu ứng — hiện với avatar-border (Đấu Trường) */}
                                 {EFFECT_OPTIONS_BY_CATEGORY[formData.category] && (
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">

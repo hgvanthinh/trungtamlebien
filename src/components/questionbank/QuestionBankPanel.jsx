@@ -27,7 +27,7 @@ const EMPTY_FILTERS = { search: '', type: '', grade: '', difficulty: '', folderI
 const PAGE_SIZE = 20;
 
 /**
- * Tab "Kho câu hỏi" — CRUD từng câu hỏi dùng lại cho Đấu Trí 1v1.
+ * Tab "Kho câu hỏi" — CRUD từng câu hỏi.
  * @param {string} createdBy - uid admin đang đăng nhập
  * @param {Function} onToast - hiển thị toast { type, message }
  */

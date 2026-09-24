@@ -38,7 +38,6 @@ classes:     { id, name, students[], sessions[] }
 storeItems:  { id, name, description, price, currency('coins'|'gold'), category, discontinued(bool), imageUrl, createdAt, updatedAt }
 inventories: { id, userId, itemId, itemName, itemDescription, itemImageUrl, purchasePrice, purchaseCurrency, purchasedAt }
 craftLogs:   { uid, userName, riskLevel, levelName, quantity, totalCost, isSuccess, goldGained, dateKey, createdAt }  # server-only
-versusRewardClaims: { sessionId(docId), uid, coins, createdAt }  # server-only, chống nhận thưởng 2 lần
 ```
 
 **`storeItems.discontinued`**: `true` = ngưng bán (soft delete) — item vẫn hiển thị, chủ sở hữu vẫn thấy trong inventory, nhưng người chưa mua không mua được. Khi xóa item → tự động xóa khỏi tất cả inventories + Storage.
@@ -66,7 +65,6 @@ tự tung RNG, nên client chỉ gửi *ý định* chứ không gửi *kết qu
 | `purchaseItem` | mua hàng | **giá + loại tiền đọc từ `storeItems`** |
 | `pigPurchase` | mua heo / mua thức ăn | khối lớp (từ `classes`), giá heo, đơn giá thức ăn |
 | `smashPiggy` | đập heo | **RNG mức vàng**, trừ `smashAttempts` |
-| `claimVersusReward` | thưởng thắng trận | xác minh người thắng từ `versusMatchResults`, chống nhận 2 lần |
 
 **Cơ chế "chống giàu"** (`getEffectiveCraftRate` / `getEffectiveSmashChance`) — tỉ lệ
 trúng giảm dần theo số Đồng Vàng HS **đang giữ**, tính ngay trong transaction sau khi

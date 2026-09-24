@@ -19,9 +19,9 @@ import { deleteQuestionImage } from './storageService';
 
 /**
  * CRUD Kho câu hỏi (collection `questionBank`, admin quản lý).
- * Mỗi doc = 1 câu hỏi độc lập, có thể chọn để đưa vào bài Đấu Trí 1v1.
+ * Mỗi doc = 1 câu hỏi độc lập.
  *
- * Schema doc — dùng chung format câu hỏi của versusGames để copy thẳng được:
+ * Schema doc:
  * {
  *   type: 'abcd' | 'true_false' | 'short_answer',
  *   inputMode: 'text' | 'image',             // 'image' = đề nằm trong ảnh, GV chỉ chấm đáp án
@@ -105,53 +105,6 @@ export const normalizeQuestion = (q) => {
             isCorrect: !!a.isCorrect
         }))
     };
-};
-
-/**
- * Bóc phần câu hỏi thuần (bỏ metadata kho) để nhúng vào bài đấu versus.
- * @param {Object} q - Doc câu hỏi từ kho
- * @returns {Object} - Câu hỏi đúng format versusGames.questions[]
- */
-export const toVersusQuestion = (q) => {
-    const type = q.type || 'abcd';
-    const isImage = q.inputMode === 'image';
-    // Câu dạng ảnh: đề nằm trong ảnh, phần text chỉ là nhãn để HS bấm chọn
-    const questionText = q.questionText?.trim() || (isImage ? 'Xem đề trong ảnh' : '');
-
-    if (type === 'true_false') {
-        const out = {
-            type: 'true_false',
-            questionText,
-            statements: (q.statements || []).map((s, i) => ({
-                text: s.text?.trim() || `Ý ${String.fromCharCode(97 + i)})`,
-                isTrue: !!s.isTrue
-            }))
-        };
-        if (q.questionImage) out.questionImage = q.questionImage;
-        return out;
-    }
-
-    if (type === 'short_answer') {
-        const out = {
-            type: 'short_answer',
-            questionText,
-            correctAnswer: q.correctAnswer,
-            alternativeAnswers: q.alternativeAnswers || []
-        };
-        if (q.questionImage) out.questionImage = q.questionImage;
-        return out;
-    }
-
-    // abcd: versus dùng câu không có field `type`
-    const out = {
-        questionText,
-        answers: (q.answers || []).map((a, i) => ({
-            text: a.text?.trim() || String.fromCharCode(65 + i),
-            isCorrect: !!a.isCorrect
-        }))
-    };
-    if (q.questionImage) out.questionImage = q.questionImage;
-    return out;
 };
 
 /**

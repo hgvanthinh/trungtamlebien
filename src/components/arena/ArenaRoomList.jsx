@@ -85,7 +85,7 @@ export default function ArenaRoomList({ myGrade, onJoin, minPlayers = 5 }) {
                             }`}
                         >
                             <Icon
-                                name={isPractice ? 'self_improvement' : 'stadium'}
+                                name={isPractice ? 'self_improvement' : 'swords'}
                                 size={26}
                                 className="text-white"
                             />
