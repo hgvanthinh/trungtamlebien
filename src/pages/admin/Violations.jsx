@@ -25,6 +25,9 @@ const Violations = () => {
   // Overview mode
   const [overviewMode, setOverviewMode] = useState(false);
 
+  // Ẩn Nộp/Tổng mặc định (phụ huynh xem dễ sốt ruột), admin tích để hiện
+  const [showPaymentDetails, setShowPaymentDetails] = useState(false);
+
   // Reset state
   const [resetting, setResetting] = useState(false);
 
@@ -501,6 +504,20 @@ const Violations = () => {
                 <span className="text-sm font-medium text-[#111812] dark:text-white">Chế độ xem tổng quan</span>
               </label>
 
+              {/* Show Paid/Total Checkbox */}
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showPaymentDetails}
+                  onChange={(e) => {
+                    setShowPaymentDetails(e.target.checked);
+                    if (!e.target.checked && sortBy === 'total') setSortBy('name');
+                  }}
+                  className="w-4 h-4 rounded border-[#d0e5d4] dark:border-white/20 text-primary focus:ring-primary"
+                />
+                <span className="text-sm font-medium text-[#111812] dark:text-white">Hiện Nộp/Tổng</span>
+              </label>
+
               {/* Sort Button with Dropdown */}
               <div className="relative">
                 <button
@@ -530,14 +547,16 @@ const Violations = () => {
                       <Icon name="money_off" className="text-lg text-red-600" />
                       <span className="text-[#111812] dark:text-white">Theo nợ phạt</span>
                     </button>
-                    <button
-                      onClick={() => handleSortChange('total')}
-                      className={`w-full px-4 py-2 text-left text-sm hover:bg-[#f0f5f1] dark:hover:bg-white/10 transition-all flex items-center gap-2 ${sortBy === 'total' ? 'bg-[#f0f5f1] dark:bg-white/10 font-bold' : ''
-                        }`}
-                    >
-                      <Icon name="warning" className="text-lg text-orange-600" />
-                      <span className="text-[#111812] dark:text-white">Theo tổng vi phạm</span>
-                    </button>
+                    {showPaymentDetails && (
+                      <button
+                        onClick={() => handleSortChange('total')}
+                        className={`w-full px-4 py-2 text-left text-sm hover:bg-[#f0f5f1] dark:hover:bg-white/10 transition-all flex items-center gap-2 ${sortBy === 'total' ? 'bg-[#f0f5f1] dark:bg-white/10 font-bold' : ''
+                          }`}
+                      >
+                        <Icon name="warning" className="text-lg text-orange-600" />
+                        <span className="text-[#111812] dark:text-white">Theo tổng vi phạm</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -671,12 +690,16 @@ const Violations = () => {
                         <span className="text-red-600 dark:text-red-400 font-bold">
                           Nợ: {student.penaltyDebt || 0}k
                         </span>
-                        <span className="text-green-600 dark:text-green-400 font-bold">
-                          Nộp: {student.paidAmount || 0}k
-                        </span>
-                        <span className="text-orange-600 dark:text-orange-400 font-bold">
-                          Tổng: {student.totalViolationAmount || 0}k
-                        </span>
+                        {showPaymentDetails && (
+                          <>
+                            <span className="text-green-600 dark:text-green-400 font-bold">
+                              Nộp: {student.paidAmount || 0}k
+                            </span>
+                            <span className="text-orange-600 dark:text-orange-400 font-bold">
+                              Tổng: {student.totalViolationAmount || 0}k
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -718,14 +741,18 @@ const Violations = () => {
                           <Icon name="money_off" className="text-base" />
                           Nợ: {student.penaltyDebt || 0}k
                         </span>
-                        <span className="text-green-600 dark:text-green-400 font-bold flex items-center gap-1">
-                          <Icon name="payments" className="text-base" />
-                          Nộp: {student.paidAmount || 0}k
-                        </span>
-                        <span className="text-orange-600 dark:text-orange-400 font-bold flex items-center gap-1">
-                          <Icon name="warning" className="text-base" />
-                          Tổng: {student.totalViolationAmount || 0}k
-                        </span>
+                        {showPaymentDetails && (
+                          <>
+                            <span className="text-green-600 dark:text-green-400 font-bold flex items-center gap-1">
+                              <Icon name="payments" className="text-base" />
+                              Nộp: {student.paidAmount || 0}k
+                            </span>
+                            <span className="text-orange-600 dark:text-orange-400 font-bold flex items-center gap-1">
+                              <Icon name="warning" className="text-base" />
+                              Tổng: {student.totalViolationAmount || 0}k
+                            </span>
+                          </>
+                        )}
                         {/* Asset display (read-only) when NOT in assets mode */}
                         {!showAssetsMode && (
                           <>
