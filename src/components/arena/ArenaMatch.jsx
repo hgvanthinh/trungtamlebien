@@ -15,12 +15,11 @@ import {
     submitArenaAnswer,
     freezeOpponent,
     burnIce,
-    setDoubleBet,
     trackArenaPresence,
     endQuestionEarly,
 } from '../../services/arenaSessionService';
-import { getArenaItems } from '../../services/arenaItemService';
-import { requestArenaHint } from '../../services/arenaRewardService';
+import { getArenaItems, formatMultiplier } from '../../services/arenaItemService';
+import { requestArenaHint, requestArenaDouble } from '../../services/arenaRewardService';
 
 const ANSWER_LABELS = ['A', 'B', 'C', 'D'];
 const STATEMENT_LABELS = ['a', 'b', 'c', 'd'];
@@ -343,22 +342,24 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
     };
 
     /**
-     * Cược x2. Đặt cho CÂU ĐANG LÀM nếu đang trong câu, cho câu kế tiếp nếu
-     * đang ở khoảng chuyển câu.
+     * Cược nhân điểm. Đặt cho CÂU ĐANG LÀM nếu đang trong câu, cho câu kế tiếp
+     * nếu đang ở khoảng chuyển câu.
      *
      * Trước đây chỉ cho đặt trong 5 giây chuyển câu — quá gấp, HS hoặc không kịp
-     * bấm hoặc quên mất mình đã cược câu nào. Server vẫn kiểm tra lại loại câu
-     * khi chấm nên cược vào câu đúng-sai vẫn không được nhân đôi.
+     * bấm hoặc quên mất mình đã cược câu nào. Server quay ngẫu nhiên hệ số
+     * x1,5 / x2 / x2,5 và báo ngay.
      */
     const handleDouble = async () => {
         setItemBusy('double');
         try {
             const target = phase === 'interstitial' ? questionIndex + 1 : questionIndex;
-            const res = await setDoubleBet(sessionId, uid, target);
-            if (res.ok) onToast?.({ type: 'success', message: `Đã cược x2 cho câu ${target + 1}! ⚡` });
-            else onToast?.({ type: 'info', message: 'Bạn đã dùng vật phẩm này rồi' });
-        } catch {
-            onToast?.({ type: 'error', message: 'Không đặt được cược' });
+            const res = await requestArenaDouble(sessionId, target);
+            onToast?.({
+                type: 'success',
+                message: `Câu ${res.qIndex + 1} được nhân ${formatMultiplier(res.multiplier)} điểm! ⚡`,
+            });
+        } catch (error) {
+            onToast?.({ type: 'error', message: error.message || 'Không đặt được cược' });
         } finally {
             setItemBusy(null);
         }
@@ -376,13 +377,14 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
         }
     };
 
-    const handleHintTf = async (statementIndex) => {
+    const handleHintTf = async () => {
         setItemBusy('hint_tf');
         try {
-            const res = await requestArenaHint(sessionId, questionIndex, 'hint_tf', statementIndex);
+            // Server chọn ngẫu nhiên ý được gợi ý, trả về res.index
+            const res = await requestArenaHint(sessionId, questionIndex, 'hint_tf');
             onToast?.({
                 type: 'success',
-                message: `Ý ${STATEMENT_LABELS[statementIndex]}) là ${res.isTrue ? 'ĐÚNG' : 'SAI'}`,
+                message: `Ý ${STATEMENT_LABELS[res.index]}) là ${res.isTrue ? 'ĐÚNG' : 'SAI'}`,
             });
         } catch (error) {
             onToast?.({ type: 'error', message: error.message || 'Không dùng được gợi ý' });
@@ -526,7 +528,7 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
                             Chuẩn bị câu tiếp theo...
                         </p>
                         <p className="text-sm text-[#556958] dark:text-[#a5b5a8] text-center">
-                            Đây là lúc đặt cược ⚡ Nhân đôi điểm.
+                            Đây là lúc đặt cược ⚡ Nhân điểm.
                         </p>
                     </div>
                 ) : question ? (
@@ -739,7 +741,8 @@ export default function ArenaMatch({ sessionId, settings, room, mode = 'live', o
                 questionType={qType}
                 nextQuestionType={questions[questionIndex + 1]?.type}
                 isFrozen={isFrozen}
-                doubleArmedFor={effects.doubleOn ?? null}
+                doubleArmedFor={effects.double?.qIndex ?? null}
+                doubleMultiplier={effects.double?.multiplier ?? null}
                 currentQuestionIndex={questionIndex}
                 isLastQuestion={questionIndex >= totalQuestions - 1}
                 players={room?.players || {}}

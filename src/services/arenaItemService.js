@@ -29,9 +29,9 @@ export const ARENA_ITEM_EFFECTS = {
         target: 'opponent'
     },
     double: {
-        label: 'Nhân đôi điểm',
+        label: 'Nhân điểm',
         icon: 'bolt',
-        description: 'Cược bất cứ lúc nào cho câu đang làm (hoặc câu sắp tới nếu đang chuyển câu): đúng thì được gấp đôi điểm. Không áp dụng câu đúng-sai.',
+        description: 'Cược bất cứ lúc nào cho câu đang làm (hoặc câu sắp tới nếu đang chuyển câu): ngẫu nhiên nhân x1,5, x2 hoặc x2,5 điểm nếu làm đúng. Không áp dụng câu đúng-sai.',
         target: 'self',
         qTypes: ['abcd', 'short_answer']
     },
@@ -45,7 +45,7 @@ export const ARENA_ITEM_EFFECTS = {
     hint_tf: {
         label: 'Gợi ý Đúng-Sai',
         icon: 'lightbulb',
-        description: 'Chọn 1 ý của câu đúng-sai để biết ý đó đúng hay sai',
+        description: 'Hé lộ ngẫu nhiên 1 ý của câu đúng-sai là đúng hay sai',
         target: 'self',
         qTypes: ['true_false']
     },
@@ -56,6 +56,9 @@ export const ARENA_ITEM_EFFECTS = {
         target: 'self'
     }
 };
+
+/** Hệ số vật phẩm nhân điểm theo kiểu Việt: 2.5 → "x2,5" */
+export const formatMultiplier = (m) => `x${String(m).replace('.', ',')}`;
 
 // Category của store item được coi là vật phẩm arena
 export const ARENA_ITEM_CATEGORY = 'avatar-border';

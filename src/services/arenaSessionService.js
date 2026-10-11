@@ -28,7 +28,7 @@
  *           startedAt, totalQuestions, playerCount }
  *   questions/{0..4}: đề ĐÃ LƯỢC ĐÁP ÁN
  *   answers/{uid}/{qIndex}: { choice, tf, text, submittedAt, elapsedMs }
- *   effects/{uid}: { used, frozenUntil, frozenBy, doubleOn, fifty, hintTf }
+ *   effects/{uid}: { used, frozenUntil, frozenBy, double: { qIndex, multiplier }, fifty, hintTf }
  *   presence/{uid}: boolean
  *   results: { ranking, gradedAt }   ← Cloud Function ghi
  */
@@ -673,31 +673,6 @@ export async function burnIce(sessionId, uid) {
     if (!result.committed) return { ok: false, reason: 'not_frozen' };
 
     await markEffectUsed(sessionId, uid, 'fire');
-    return { ok: true };
-}
-
-/**
- * Đặt cược nhân đôi điểm cho câu kế tiếp.
- * Chỉ ghi Ý ĐỊNH — Cloud Function mới quyết định có nhân đôi hay không
- * (kiểm tra lại loại câu và đúng/sai), nên client không lách được.
- */
-export async function setDoubleBet(sessionId, uid, qIndex) {
-    // Chốt lượt dùng bằng transaction trên ô `used/double` (ô lá, tự sở hữu),
-    // rồi mới ghi doubleOn. Không ghi cả node effects/{uid} vì như vậy sẽ kéo
-    // theo fifty/hintTf — hai ô rules cấm client ghi — và bị từ chối toàn bộ.
-    const usedRef = ref(realtimeDb, `${SESSIONS_PATH}/${sessionId}/effects/${uid}/used/double`);
-
-    const result = await runTransaction(usedRef, (current) => (current ? undefined : true));
-    if (!result.committed) return { ok: false, reason: 'already_used' };
-
-    try {
-        await set(ref(realtimeDb, `${SESSIONS_PATH}/${sessionId}/effects/${uid}/doubleOn`), qIndex);
-    } catch (error) {
-        // Ghi ý định thất bại → trả lại lượt để HS không mất oan vật phẩm
-        await remove(usedRef).catch(() => {});
-        throw error;
-    }
-
     return { ok: true };
 }
 

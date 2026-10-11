@@ -986,6 +986,9 @@ const DEFAULT_ARENA_SETTINGS = {
 // Đúng 1 ý = 10%, 2 ý = 25%, 3 ý = 50%, đúng cả 4 ý = 100%.
 const ARENA_TF_RATIO = [0, 0.1, 0.25, 0.5, 1];
 
+// Hệ số ngẫu nhiên của vật phẩm nhân điểm, xác suất ngang nhau
+const ARENA_DOUBLE_MULTIPLIERS = [1.5, 2, 2.5];
+
 const getArenaSettings = async (db) => {
     const snap = await db.doc('settings/arenaGame').get();
     const data = snap.exists ? snap.data() : {};
@@ -1001,7 +1004,7 @@ const normalizeShortAnswer = (s) =>
     String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 /**
- * Chấm một câu hỏi. Trả về số điểm thô (chưa tính nhân đôi).
+ * Chấm một câu hỏi. Trả về số điểm thô (chưa tính vật phẩm nhân điểm).
  *
  * Câu đúng-sai: ý KHÔNG trả lời phải tính là SAI. Dùng `?? null` để ý bỏ trống
  * không bao giờ khớp với boolean isTrue.
@@ -1581,15 +1584,18 @@ exports.finalizeArenaMatch = moneyFunction(async ({ uid, body, db }) => {
             const ans = playerAnswers[i];
             let pts = gradeArenaQuestion(q, ans);
 
-            // Nhân đôi: kiểm tra LẠI loại câu ở server — client ghi được ý định
-            // đặt cược lên câu bất kỳ, nhưng câu đúng-sai 2đ không được nhân.
+            // Nhân điểm: hệ số do useArenaDouble quay và ghi (client không ghi
+            // được). Vẫn kiểm tra lại loại câu phòng khi admin đổi cài đặt giữa trận.
+            const bet = playerEffects.double;
+            const mult = Number(bet?.multiplier);
             if (
                 pts > 0 &&
-                typeof playerEffects.doubleOn === 'number' &&
-                playerEffects.doubleOn === i &&
+                bet &&
+                Number(bet.qIndex) === i &&
+                ARENA_DOUBLE_MULTIPLIERS.includes(mult) &&
                 doubleAllowed.includes(q.type)
             ) {
-                pts *= 2;
+                pts *= mult;
             }
             score += pts;
 
@@ -1821,10 +1827,10 @@ exports.cleanupArenaRoom = moneyFunction(async ({ body, db }) => {
  * Phải chạy server-side vì Realtime Database không có đáp án. Server tự đánh
  * dấu đã dùng trong cùng lượt gọi nên không thể dùng lại vật phẩm.
  *
- * Client gửi: { sessionId, qIndex, effect: 'fifty'|'hint_tf', statementIndex? }
+ * Client gửi: { sessionId, qIndex, effect: 'fifty'|'hint_tf' }
  */
 exports.useArenaHint = moneyFunction(async ({ uid, body, db }) => {
-    const { sessionId, qIndex, effect, statementIndex } = body;
+    const { sessionId, qIndex, effect } = body;
     if (!sessionId) throw new Error('Thiếu mã trận đấu');
     if (effect !== 'fifty' && effect !== 'hint_tf') throw new Error('Vật phẩm không hợp lệ');
 
@@ -1876,21 +1882,79 @@ exports.useArenaHint = moneyFunction(async ({ uid, body, db }) => {
             return { effect, removed };
         }
 
-        // hint_tf
+        // hint_tf: server chọn ngẫu nhiên 1 ý. Không cho HS tự chọn vì HS sẽ
+        // luôn chọn ý khó nhất (thường là ý d), làm vật phẩm quá mạnh.
         if (question.type !== 'true_false') {
             throw new Error('Vật phẩm gợi ý chỉ dùng cho câu đúng-sai');
         }
-        const sIndex = Number(statementIndex);
         const statements = question.statements || [];
-        if (!Number.isInteger(sIndex) || sIndex < 0 || sIndex >= statements.length) {
-            throw new Error('Ý cần gợi ý không hợp lệ');
-        }
+        if (statements.length === 0) throw new Error('Câu hỏi không có ý nào để gợi ý');
+        const sIndex = Math.floor(Math.random() * statements.length);
 
         const hint = { index: sIndex, isTrue: !!statements[sIndex].isTrue };
         await rtdb.ref(`${sessionPath}/effects/${uid}/hintTf/${index}`).set(hint);
         return { effect, ...hint };
     } catch (error) {
         // Trả lại lượt dùng nếu không tạo được gợi ý (sai loại câu, ý không hợp lệ)
+        await usedRef.remove().catch(() => {});
+        throw error;
+    }
+});
+
+/**
+ * Dùng vật phẩm nhân điểm: server quay ngẫu nhiên hệ số x1,5 / x2 / x2,5 và
+ * báo ngay cho HS. Hệ số phải do server quay và ghi vào ô client không ghi
+ * được, nếu không HS sẽ tự ghi x2,5.
+ *
+ * Cược cho câu đang làm (phase 'question') hoặc câu kế tiếp (phase
+ * 'interstitial'). Chỉ nhân khi câu đó trả lời có điểm — finalizeArenaMatch xử lý.
+ *
+ * Client gửi: { sessionId, qIndex }
+ */
+exports.useArenaDouble = moneyFunction(async ({ uid, body, db }) => {
+    const { sessionId, qIndex } = body;
+    if (!sessionId) throw new Error('Thiếu mã trận đấu');
+
+    const index = Number(qIndex);
+    if (!Number.isInteger(index) || index < 0) throw new Error('Câu hỏi không hợp lệ');
+
+    const sessionSnap = await db.doc(`arenaSessions/${sessionId}`).get();
+    if (!sessionSnap.exists) throw new Error('Không tìm thấy trận đấu');
+
+    const session = sessionSnap.data();
+    if (!(session.playerUids || []).includes(uid)) throw new Error('Bạn không tham gia trận này');
+
+    const question = (session.questions || [])[index];
+    if (!question) throw new Error('Không tìm thấy câu hỏi');
+
+    const settings = await getArenaSettings(db);
+    const doubleAllowed = settings.doubleAllowedTypes || DEFAULT_ARENA_SETTINGS.doubleAllowedTypes;
+    if (!doubleAllowed.includes(question.type)) {
+        throw new Error('Vật phẩm nhân điểm không áp dụng cho loại câu này');
+    }
+
+    const rtdb = admin.database();
+    const sessionPath = `arena_sessions/${sessionId}`;
+
+    // Chỉ cược được câu đang làm, hoặc câu kế tiếp khi đang chuyển câu —
+    // không cược ngược về câu đã qua (đã biết mình đúng hay sai).
+    const metaSnap = await rtdb.ref(`${sessionPath}/meta`).get();
+    const meta = metaSnap.val() || {};
+    if (meta.status !== 'running') throw new Error('Trận đấu không trong lúc thi đấu');
+    const current = Number(meta.questionIndex);
+    const expected = meta.phase === 'interstitial' ? current + 1 : current;
+    if (index !== expected) throw new Error('Chỉ cược được câu đang làm hoặc câu sắp tới');
+
+    const usedRef = rtdb.ref(`${sessionPath}/effects/${uid}/used/double`);
+    const claim = await usedRef.transaction((cur) => (cur ? undefined : true));
+    if (!claim.committed) throw new Error('Bạn đã dùng vật phẩm này trong trận rồi');
+
+    try {
+        const multiplier =
+            ARENA_DOUBLE_MULTIPLIERS[Math.floor(Math.random() * ARENA_DOUBLE_MULTIPLIERS.length)];
+        await rtdb.ref(`${sessionPath}/effects/${uid}/double`).set({ qIndex: index, multiplier });
+        return { qIndex: index, multiplier };
+    } catch (error) {
         await usedRef.remove().catch(() => {});
         throw error;
     }

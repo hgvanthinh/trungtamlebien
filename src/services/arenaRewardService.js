@@ -69,16 +69,23 @@ export const finalizeArenaMatch = async (sessionId, { retries = 3, delayMs = 100
  *
  * @param {string} sessionId
  * @param {number} qIndex - Vị trí câu đang làm
- * @param {'fifty'|'hint_tf'} effect
- * @param {number} [statementIndex] - Ý muốn gợi ý (chỉ với hint_tf)
+ * @param {'fifty'|'hint_tf'} effect - Với hint_tf, server tự chọn ngẫu nhiên ý gợi ý
  * @returns {Promise<{ effect: string, removed?: number[], index?: number, isTrue?: boolean }>}
  */
-export const requestArenaHint = async (sessionId, qIndex, effect, statementIndex = null) => {
-    const payload = { sessionId, qIndex, effect };
-    if (statementIndex !== null && statementIndex !== undefined) {
-        payload.statementIndex = statementIndex;
-    }
-    return await callMoneyFunction('useArenaHint', payload);
+export const requestArenaHint = async (sessionId, qIndex, effect) => {
+    return await callMoneyFunction('useArenaHint', { sessionId, qIndex, effect });
+};
+
+/**
+ * Dùng vật phẩm nhân điểm: server quay ngẫu nhiên hệ số x1,5 / x2 / x2,5.
+ * KHÔNG retry, cùng lý do với requestArenaHint.
+ *
+ * @param {string} sessionId
+ * @param {number} qIndex - Câu đặt cược (câu đang làm, hoặc câu kế tiếp khi đang chuyển câu)
+ * @returns {Promise<{ qIndex: number, multiplier: number }>}
+ */
+export const requestArenaDouble = async (sessionId, qIndex) => {
+    return await callMoneyFunction('useArenaDouble', { sessionId, qIndex });
 };
 
 /**

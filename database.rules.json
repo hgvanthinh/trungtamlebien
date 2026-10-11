@@ -68,7 +68,7 @@
         "effects": {
           "$uid": {
             "used": { ".write": "auth.uid == $uid" },
-            "doubleOn": { ".write": "auth.uid == $uid" },
+            "double": { ".write": false },
             "frozenUntil": { ".write": "auth != null" },
             "frozenBy": { ".write": "auth != null" },
             "fifty": { ".write": false },

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import Icon from '../common/Icon';
-import { ARENA_ITEM_EFFECTS, isEffectUsableForType } from '../../services/arenaItemService';
+import { ARENA_ITEM_EFFECTS, isEffectUsableForType, formatMultiplier } from '../../services/arenaItemService';
 
 /**
  * Thanh vật phẩm trong trận Đấu Trường.
@@ -28,6 +28,7 @@ export default function ArenaItemBar({
     nextQuestionType,
     isFrozen,
     doubleArmedFor = null,
+    doubleMultiplier = null,
     currentQuestionIndex = 0,
     isLastQuestion = false,
     players = {},
@@ -40,7 +41,6 @@ export default function ArenaItemBar({
     busy = null,
 }) {
     const [showTargets, setShowTargets] = useState(false);
-    const [showStatementPicker, setShowStatementPicker] = useState(false);
 
     const ownedEffects = ORDER.filter((e) => owned[e]);
 
@@ -58,7 +58,7 @@ export default function ArenaItemBar({
                 </div>
                 <p className="text-xs text-[#556958] dark:text-[#a5b5a8]">
                     Bạn chưa có vật phẩm nào. Mua <b>viền avatar có hiệu ứng</b> ở Cửa Hàng để
-                    dùng được ❄️ Đóng băng, ⚡ Nhân đôi điểm, 50/50... trong trận.
+                    dùng được ❄️ Đóng băng, ⚡ Nhân điểm, 50/50... trong trận.
                 </p>
             </div>
         );
@@ -123,7 +123,7 @@ export default function ArenaItemBar({
                 onFifty?.();
                 break;
             case 'hint_tf':
-                setShowStatementPicker(true);
+                onHintTf?.();
                 break;
             case 'fire':
                 onFire?.();
@@ -145,7 +145,7 @@ export default function ArenaItemBar({
                     </span>
                     {doubleArmedFor !== null && doubleArmedFor >= currentQuestionIndex && (
                         <span className="ml-auto px-2 py-0.5 rounded-full bg-amber-400 text-amber-950 text-xs font-extrabold animate-pulse">
-                            ⚡ Cược x2 câu {doubleArmedFor + 1}
+                            ⚡ Câu {doubleArmedFor + 1}: {doubleMultiplier ? formatMultiplier(doubleMultiplier) : 'nhân điểm'}
                         </span>
                     )}
                 </div>
@@ -232,51 +232,6 @@ export default function ArenaItemBar({
 
                         <button
                             onClick={() => setShowTargets(false)}
-                            className="w-full mt-4 py-2.5 rounded-2xl font-bold text-[#556958] dark:text-[#a5b5a8] hover:bg-[#f0f5f1] dark:hover:bg-white/10"
-                        >
-                            Huỷ
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Chọn ý cần gợi ý (câu đúng-sai) */}
-            {showStatementPicker && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-                    onClick={() => setShowStatementPicker(false)}
-                >
-                    <div
-                        className="clay-card w-full max-w-sm p-5 animate-scale-in"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="flex items-center gap-2 mb-1">
-                            <span className="text-2xl">💡</span>
-                            <h3 className="text-lg font-extrabold text-[#111812] dark:text-white">
-                                Gợi ý ý nào?
-                            </h3>
-                        </div>
-                        <p className="text-sm text-[#556958] dark:text-[#a5b5a8] mb-4">
-                            Bạn sẽ biết ý đó đúng hay sai. Chỉ chọn được 1 ý.
-                        </p>
-
-                        <div className="grid grid-cols-2 gap-2">
-                            {['a', 'b', 'c', 'd'].map((label, idx) => (
-                                <button
-                                    key={label}
-                                    onClick={() => {
-                                        setShowStatementPicker(false);
-                                        onHintTf?.(idx);
-                                    }}
-                                    className="py-3 rounded-2xl bg-[#f0f5f1] dark:bg-white/5 hover:bg-amber-100 dark:hover:bg-amber-500/20 font-extrabold text-[#111812] dark:text-white transition-colors"
-                                >
-                                    Ý {label})
-                                </button>
-                            ))}
-                        </div>
-
-                        <button
-                            onClick={() => setShowStatementPicker(false)}
                             className="w-full mt-4 py-2.5 rounded-2xl font-bold text-[#556958] dark:text-[#a5b5a8] hover:bg-[#f0f5f1] dark:hover:bg-white/10"
                         >
                             Huỷ
