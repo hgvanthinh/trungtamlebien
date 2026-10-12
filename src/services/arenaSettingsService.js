@@ -5,7 +5,8 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
  * Cài đặt mặc định cho Đấu Trường (arena) — quiz nhiều người chơi realtime.
  * Admin có thể ghi đè qua trang Admin (lưu vào settings/arenaGame).
  *
- * Cơ cấu đề: 3 câu ABCD (0.5đ) + 1 câu đúng-sai 4 ý (2đ) + 1 câu điền (1đ) = 4.5đ
+ * Cơ cấu đề mặc định: 3 câu ABCD (0.5đ) + 1 câu đúng-sai 4 ý (2đ) + 1 câu điền (1đ) = 4.5đ.
+ * Số câu mỗi dạng chỉnh được; thứ tự trong trận luôn là ABCD → đúng-sai → điền.
  */
 export const DEFAULT_ARENA_SETTINGS = {
     // Câu ABCD
@@ -14,10 +15,12 @@ export const DEFAULT_ARENA_SETTINGS = {
     abcdPoints: 0.5,
 
     // Câu đúng-sai 4 ý (điểm theo bậc thang số ý đúng)
+    tfCount: 1,
     tfSeconds: 210,           // 3,5 phút
     tfPoints: 2,
 
     // Câu điền đáp án
+    shortAnswerCount: 1,
     shortAnswerSeconds: 300,  // 5 phút
     shortAnswerPoints: 1,
 
@@ -124,37 +127,25 @@ export const updateArenaSettings = async (partial) => {
 };
 
 /**
- * Thời gian (giây) của câu thứ `index` theo cơ cấu đề chuẩn.
- * Thứ tự cố định: [abcd, abcd, abcd, true_false, short_answer]
- * @param {number} index - Vị trí câu (0-based)
+ * Thời gian (giây) theo DẠNG câu. Tính theo dạng chứ không theo vị trí vì số
+ * câu mỗi dạng chỉnh được (đồng bộ với arenaSecondsFor ở Cloud Function).
+ * @param {string} type - 'abcd' | 'true_false' | 'short_answer'
  * @param {Object} settings - Cài đặt arena
  * @returns {number} - Số giây
  */
-export const getQuestionSeconds = (index, settings = DEFAULT_ARENA_SETTINGS) => {
-    const abcdCount = settings.abcdCount ?? DEFAULT_ARENA_SETTINGS.abcdCount;
-    if (index < abcdCount) return settings.abcdSeconds ?? DEFAULT_ARENA_SETTINGS.abcdSeconds;
-    if (index === abcdCount) return settings.tfSeconds ?? DEFAULT_ARENA_SETTINGS.tfSeconds;
-    return settings.shortAnswerSeconds ?? DEFAULT_ARENA_SETTINGS.shortAnswerSeconds;
+export const getQuestionSeconds = (type, settings = DEFAULT_ARENA_SETTINGS) => {
+    if (type === 'true_false') return settings.tfSeconds ?? DEFAULT_ARENA_SETTINGS.tfSeconds;
+    if (type === 'short_answer') return settings.shortAnswerSeconds ?? DEFAULT_ARENA_SETTINGS.shortAnswerSeconds;
+    return settings.abcdSeconds ?? DEFAULT_ARENA_SETTINGS.abcdSeconds;
 };
 
 /**
- * Điểm tối đa của câu thứ `index`
- * @param {number} index - Vị trí câu (0-based)
- * @param {Object} settings - Cài đặt arena
- * @returns {number}
- */
-export const getQuestionPoints = (index, settings = DEFAULT_ARENA_SETTINGS) => {
-    const abcdCount = settings.abcdCount ?? DEFAULT_ARENA_SETTINGS.abcdCount;
-    if (index < abcdCount) return settings.abcdPoints ?? DEFAULT_ARENA_SETTINGS.abcdPoints;
-    if (index === abcdCount) return settings.tfPoints ?? DEFAULT_ARENA_SETTINGS.tfPoints;
-    return settings.shortAnswerPoints ?? DEFAULT_ARENA_SETTINGS.shortAnswerPoints;
-};
-
-/**
- * Tổng số câu của một trận theo cài đặt (3 ABCD + 1 Đ/S + 1 điền = 5)
+ * Số câu mỗi dạng trong một trận
  * @param {Object} settings
- * @returns {number}
+ * @returns {{ abcd: number, true_false: number, short_answer: number }}
  */
-export const getTotalQuestions = (settings = DEFAULT_ARENA_SETTINGS) => {
-    return (settings.abcdCount ?? DEFAULT_ARENA_SETTINGS.abcdCount) + 2;
-};
+export const getQuestionCounts = (settings = DEFAULT_ARENA_SETTINGS) => ({
+    abcd: Number(settings.abcdCount ?? DEFAULT_ARENA_SETTINGS.abcdCount),
+    true_false: Number(settings.tfCount ?? DEFAULT_ARENA_SETTINGS.tfCount),
+    short_answer: Number(settings.shortAnswerCount ?? DEFAULT_ARENA_SETTINGS.shortAnswerCount),
+});

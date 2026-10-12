@@ -46,9 +46,11 @@ const TIME_FIELDS = [
 
 const SETTINGS_FIELDS = [
     { key: 'abcdPoints', label: 'Điểm mỗi câu trắc nghiệm', min: 0, step: 0.1 },
-    { key: 'abcdCount', label: 'Số câu trắc nghiệm', min: 1 },
-    { key: 'tfPoints', label: 'Điểm câu đúng-sai', min: 0, step: 0.1 },
-    { key: 'shortAnswerPoints', label: 'Điểm câu điền đáp án', min: 0, step: 0.1 },
+    { key: 'abcdCount', label: 'Số câu trắc nghiệm', min: 0 },
+    { key: 'tfPoints', label: 'Điểm mỗi câu đúng-sai', min: 0, step: 0.1 },
+    { key: 'tfCount', label: 'Số câu đúng-sai', min: 0 },
+    { key: 'shortAnswerPoints', label: 'Điểm mỗi câu điền đáp án', min: 0, step: 0.1 },
+    { key: 'shortAnswerCount', label: 'Số câu điền đáp án', min: 0 },
     { key: 'countdownSeconds', label: 'Đếm ngược trước câu đầu (giây)', min: 0 },
     { key: 'interstitialSeconds', label: 'Khoảng chuyển câu (giây)', min: 1 },
     { key: 'minPlayers', label: 'Số người tối thiểu để bắt đầu', min: 2 },
@@ -307,7 +309,9 @@ export default function AdminArena() {
             if (!res.ok) {
                 const messages = {
                     limit_reached: `Đã mở tối đa ${settings.maxOpenRooms} phòng cùng lúc`,
-                    not_enough_questions: 'Thư mục đề không đủ câu theo cơ cấu 3 trắc nghiệm + 1 đúng-sai + 1 điền',
+                    not_enough_questions:
+                        `Thư mục đề không đủ câu theo cơ cấu ${settings.abcdCount ?? 3} trắc nghiệm + ` +
+                        `${settings.tfCount ?? 1} đúng-sai + ${settings.shortAnswerCount ?? 1} điền`,
                 };
                 setToast({ type: 'error', message: messages[res.reason] || 'Không mở được phòng' });
                 return;
@@ -357,6 +361,14 @@ export default function AdminArena() {
     };
 
     const handleSaveSettings = async () => {
+        const totalQuestions =
+            (Number(settings.abcdCount) || 0) +
+            (Number(settings.tfCount) || 0) +
+            (Number(settings.shortAnswerCount) || 0);
+        if (totalQuestions === 0) {
+            setToast({ type: 'error', message: 'Trận đấu cần ít nhất 1 câu hỏi' });
+            return;
+        }
         setSavingSettings(true);
         try {
             await updateArenaSettings(settings);

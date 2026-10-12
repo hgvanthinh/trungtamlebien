@@ -58,6 +58,7 @@ import { serverNowSync } from '../hooks/useServerTime';
 import {
     getArenaSettings,
     getQuestionSeconds,
+    getQuestionCounts,
 } from './arenaSettingsService';
 
 /**
@@ -414,16 +415,12 @@ async function reassignHostIfNeeded(roomId, leavingUid) {
 // ==================== CHỌN ĐỀ ====================
 
 /**
- * Kiểm tra thư mục có đủ câu theo cơ cấu (3 ABCD + 1 đúng-sai + 1 điền) không.
+ * Kiểm tra thư mục có đủ câu theo cơ cấu admin cài (mặc định 3 ABCD + 1 đúng-sai + 1 điền) không.
  * @returns {Promise<{ ok: boolean, counts: Object, need: Object }>}
  */
 export async function checkFolderAvailability(folderId, settings = null) {
     const cfg = settings || (await getArenaSettings());
-    const need = {
-        abcd: cfg.abcdCount ?? 3,
-        true_false: 1,
-        short_answer: 1,
-    };
+    const need = getQuestionCounts(cfg);
 
     const questions = await fetchFolderQuestions(folderId);
     const counts = { abcd: 0, true_false: 0, short_answer: 0 };
@@ -481,6 +478,18 @@ async function fetchFolderQuestions(folderId) {
 export async function advanceArenaPhase(sessionId, expectedIndex, expectedPhase, settings) {
     const metaRef = ref(realtimeDb, `${SESSIONS_PATH}/${sessionId}/meta`);
 
+    // Thời lượng câu kế tiếp lấy từ chính đề của trận (server ghi lúc tạo trận),
+    // không suy theo vị trí: số câu mỗi dạng chỉnh được nên câu thứ i không cố
+    // định là dạng gì. Đọc trước vì callback transaction không được async.
+    let nextSeconds = null;
+    if (expectedPhase === 'interstitial') {
+        const nextSnap = await get(
+            ref(realtimeDb, `${SESSIONS_PATH}/${sessionId}/questions/${expectedIndex + 1}`)
+        );
+        const nextQ = nextSnap.val();
+        nextSeconds = Number(nextQ?.seconds) || getQuestionSeconds(nextQ?.type, settings);
+    }
+
     const result = await runTransaction(metaRef, (meta) => {
         if (!meta || meta.status !== 'running') return meta;
         if (meta.questionIndex !== expectedIndex || meta.phase !== expectedPhase) return meta;
@@ -504,7 +513,6 @@ export async function advanceArenaPhase(sessionId, expectedIndex, expectedPhase,
 
         // interstitial → câu kế tiếp
         const next = expectedIndex + 1;
-        const nextSeconds = getQuestionSeconds(next, settings);
         return {
             ...meta,
             questionIndex: next,

@@ -127,11 +127,16 @@ export default function ArenaResult({ sessionId, myUid, onExit, onToast }) {
             {me && (
                 <div className="clay-card p-5 text-center">
                     <div className="text-5xl mb-1">
-                        {RANK_STYLES[me.rank]?.medal || '🎯'}
+                        {RANK_STYLES[me.rank]?.medal || (me.lucky ? '🍀' : '🎯')}
                     </div>
                     <p className="text-2xl font-black text-[#111812] dark:text-white">
                         Hạng {me.rank}
                     </p>
+                    {me.lucky && (
+                        <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                            Bạn được bốc thăm may mắn!
+                        </p>
+                    )}
                     <p className="text-sm text-[#556958] dark:text-[#a5b5a8] mt-0.5">
                         {me.score}đ · {formatTime(me.totalMs)}
                     </p>
@@ -208,6 +213,11 @@ export default function ArenaResult({ sessionId, myUid, onExit, onToast }) {
                                         {isMe && (
                                             <span className="ml-1 text-xs text-primary font-extrabold">
                                                 (bạn)
+                                            </span>
+                                        )}
+                                        {r.lucky && (
+                                            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-extrabold">
+                                                🍀 May mắn
                                             </span>
                                         )}
                                     </p>

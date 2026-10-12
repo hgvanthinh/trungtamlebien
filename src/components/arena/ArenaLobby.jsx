@@ -4,7 +4,7 @@ import Button from '../common/Button';
 import { ARENA_ITEM_EFFECTS } from '../../services/arenaItemService';
 import { getArenaItems } from '../../services/arenaItemService';
 import { startArenaMatch } from '../../services/arenaRewardService';
-import { DEFAULT_ARENA_SETTINGS, formatSeconds } from '../../services/arenaSettingsService';
+import { DEFAULT_ARENA_SETTINGS, formatSeconds, getQuestionCounts } from '../../services/arenaSettingsService';
 
 /**
  * Phòng chờ Đấu Trường.
@@ -15,6 +15,7 @@ import { DEFAULT_ARENA_SETTINGS, formatSeconds } from '../../services/arenaSetti
 
 export default function ArenaLobby({ roomId, room, myUid, settings, onLeave, onToast }) {
     const cfg = settings || DEFAULT_ARENA_SETTINGS;
+    const counts = getQuestionCounts(cfg);
     const [starting, setStarting] = useState(false);
     const [myItems, setMyItems] = useState({});
 
@@ -74,20 +75,28 @@ export default function ArenaLobby({ roomId, room, myUid, settings, onLeave, onT
                 {/* Thể lệ ngắn */}
                 <div className="mt-3 p-3 rounded-2xl bg-[#f0f5f1] dark:bg-white/5 text-xs text-[#556958] dark:text-[#a5b5a8] space-y-1">
                     <p className="font-bold text-[#111812] dark:text-white">Thể lệ</p>
-                    <p>
-                        · {cfg.abcdCount} câu trắc nghiệm ({cfg.abcdPoints}đ —{' '}
-                        {formatSeconds(cfg.abcdSeconds)}/câu)
-                    </p>
-                    <p>
-                        · 1 câu đúng-sai 4 ý ({cfg.tfPoints}đ — {formatSeconds(cfg.tfSeconds)})
-                    </p>
-                    <p>
-                        · 1 câu điền đáp án ({cfg.shortAnswerPoints}đ —{' '}
-                        {formatSeconds(cfg.shortAnswerSeconds)})
-                    </p>
+                    {counts.abcd > 0 && (
+                        <p>
+                            · {counts.abcd} câu trắc nghiệm ({cfg.abcdPoints}đ —{' '}
+                            {formatSeconds(cfg.abcdSeconds)}/câu)
+                        </p>
+                    )}
+                    {counts.true_false > 0 && (
+                        <p>
+                            · {counts.true_false} câu đúng-sai 4 ý ({cfg.tfPoints}đ —{' '}
+                            {formatSeconds(cfg.tfSeconds)}/câu)
+                        </p>
+                    )}
+                    {counts.short_answer > 0 && (
+                        <p>
+                            · {counts.short_answer} câu điền đáp án ({cfg.shortAnswerPoints}đ —{' '}
+                            {formatSeconds(cfg.shortAnswerSeconds)}/câu)
+                        </p>
+                    )}
                     <p>· Đáp án đã nộp vẫn sửa được tới khi hết giờ câu đó</p>
                     <p>· Cả phòng trả lời xong thì qua câu luôn, khỏi chờ hết giờ</p>
-                    <p>· Bằng điểm thì ai làm nhanh hơn xếp trên</p>
+                    <p>· Top 3 xếp theo điểm, bằng điểm thì ai làm nhanh hơn xếp trên</p>
+                    <p>· Hạng 4, 5 🍀 bốc thăm ngẫu nhiên trong các bạn còn lại có điểm</p>
                     <p className="text-primary-dark dark:text-primary font-bold pt-0.5">
                         Top 5 nhận{' '}
                         {[1, 2, 3, 4, 5].map((r) => cfg.rewards?.[r] ?? 0).join('/')} điểm tích luỹ

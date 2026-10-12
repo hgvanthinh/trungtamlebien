@@ -1,5 +1,6 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const crypto = require("crypto");
 const cors = require("cors")({ origin: true });
 
 // Initialize Firebase Admin
@@ -976,6 +977,8 @@ exports.awardExamXp = moneyFunction(async ({ uid: callerUid, body, db, email }) 
 
 const DEFAULT_ARENA_SETTINGS = {
     abcdCount: 3,
+    tfCount: 1,
+    shortAnswerCount: 1,
     minPlayers: 5,
     rewards: { 1: 50, 2: 40, 3: 30, 4: 20, 5: 20 },
     dailyCapPoints: 100,
@@ -988,6 +991,44 @@ const ARENA_TF_RATIO = [0, 0.1, 0.25, 0.5, 1];
 
 // Hệ số ngẫu nhiên của vật phẩm nhân điểm, xác suất ngang nhau
 const ARENA_DOUBLE_MULTIPLIERS = [1.5, 2, 2.5];
+
+// Top 3 xếp theo điểm; các hạng sau (đến hạng 5) bốc thăm ngẫu nhiên
+const ARENA_TOP_BY_SCORE = 3;
+const ARENA_LUCKY_SLOTS = 2;
+
+/**
+ * Bốc thăm hạng 4, 5 trong số người ngoài top 3 (sửa `ranking` tại chỗ).
+ *
+ * Chỉ bốc trong những bạn có điểm > 0 vì 0 điểm không được nhận thưởng —
+ * bốc trúng thì phí suất. Không đủ người thì phần còn thiếu giữ thứ tự điểm.
+ * Người trúng được gắn `lucky: true` để màn kết quả hiện 🍀.
+ *
+ * Phải TẤT ĐỊNH theo sessionId: mọi client đều gọi finalize, hai lần chấm
+ * chạy song song mà bốc ra hai kết quả khác nhau thì thưởng bị lệch. Nên dùng
+ * hash của sessionId làm nguồn ngẫu nhiên thay cho Math.random().
+ *
+ * @param {Array} ranking - Đã sắp xếp theo điểm
+ * @param {string} sessionId
+ */
+const applyArenaLuckyDraw = (ranking, sessionId) => {
+    const rest = ranking.slice(ARENA_TOP_BY_SCORE);
+    const eligible = rest.filter((r) => r.score > 0);
+    if (eligible.length === 0) return;
+
+    const seed = crypto.createHash('sha256').update(`arena-lucky:${sessionId}`).digest();
+    const pool = [...eligible];
+    const winners = [];
+    for (let k = 0; k < ARENA_LUCKY_SLOTS && pool.length > 0; k++) {
+        const j = seed.readUInt32BE(k * 4) % pool.length;
+        winners.push(pool.splice(j, 1)[0]);
+    }
+    winners.forEach((r) => {
+        r.lucky = true;
+    });
+
+    const others = rest.filter((r) => !winners.includes(r));
+    ranking.splice(ARENA_TOP_BY_SCORE, rest.length, ...winners, ...others);
+};
 
 const getArenaSettings = async (db) => {
     const snap = await db.doc('settings/arenaGame').get();
@@ -1048,35 +1089,74 @@ const shuffleArena = (arr) => {
     return a;
 };
 
-/** Thời lượng (giây) của câu thứ `index` theo cơ cấu đề chuẩn */
-const arenaSecondsFor = (index, cfg) => {
-    const abcdCount = Number(cfg.abcdCount ?? 3);
-    if (index < abcdCount) return Number(cfg.abcdSeconds ?? 30);
-    if (index === abcdCount) return Number(cfg.tfSeconds ?? 210);
-    return Number(cfg.shortAnswerSeconds ?? 300);
+/**
+ * Thời lượng (giây) theo DẠNG câu. Tính theo dạng chứ không theo vị trí vì số
+ * câu mỗi dạng do admin chỉnh (vd 6 ABCD + 2 đúng-sai + 1 điền).
+ */
+const arenaSecondsFor = (type, cfg) => {
+    if (type === 'true_false') return Number(cfg.tfSeconds ?? 210);
+    if (type === 'short_answer') return Number(cfg.shortAnswerSeconds ?? 300);
+    return Number(cfg.abcdSeconds ?? 30);
 };
 
-/** Điểm tối đa của câu thứ `index` */
-const arenaPointsFor = (index, cfg) => {
-    const abcdCount = Number(cfg.abcdCount ?? 3);
-    if (index < abcdCount) return Number(cfg.abcdPoints ?? 0.5);
-    if (index === abcdCount) return Number(cfg.tfPoints ?? 2);
-    return Number(cfg.shortAnswerPoints ?? 1);
+/** Điểm tối đa theo DẠNG câu */
+const arenaPointsFor = (type, cfg) => {
+    if (type === 'true_false') return Number(cfg.tfPoints ?? 2);
+    if (type === 'short_answer') return Number(cfg.shortAnswerPoints ?? 1);
+    return Number(cfg.abcdPoints ?? 0.5);
+};
+
+/** Số câu mỗi dạng trong một trận (admin chỉnh ở settings/arenaGame) */
+const arenaQuestionCounts = (cfg) => ({
+    abcd: Math.max(0, Number(cfg.abcdCount ?? 3)),
+    true_false: Math.max(0, Number(cfg.tfCount ?? 1)),
+    short_answer: Math.max(0, Number(cfg.shortAnswerCount ?? 1)),
+});
+
+/**
+ * Random đề theo cơ cấu: N câu ABCD → N câu đúng-sai → N câu điền.
+ * Dùng chung cho trận thi đấu và luyện tập một mình.
+ */
+const pickArenaQuestions = (bankDocs, cfg) => {
+    const byType = { abcd: [], true_false: [], short_answer: [] };
+    bankDocs.forEach((d) => {
+        const q = d.data();
+        const type = q.type || 'abcd';
+        if (byType[type]) byType[type].push(q);
+    });
+
+    const need = arenaQuestionCounts(cfg);
+    if (need.abcd + need.true_false + need.short_answer === 0) {
+        throw new Error('Cài đặt Đấu Trường đang để 0 câu hỏi');
+    }
+    if (Object.keys(need).some((type) => byType[type].length < need[type])) {
+        throw new Error(
+            `Thư mục đề không đủ câu hỏi theo cơ cấu (${need.abcd} trắc nghiệm + ` +
+            `${need.true_false} đúng-sai + ${need.short_answer} điền đáp án)`
+        );
+    }
+
+    const picked = [
+        ...shuffleArena(byType.abcd).slice(0, need.abcd),
+        ...shuffleArena(byType.true_false).slice(0, need.true_false),
+        ...shuffleArena(byType.short_answer).slice(0, need.short_answer),
+    ];
+    return picked.map((q) => toArenaQuestionServer(q, cfg));
 };
 
 /**
  * Chuyển câu hỏi kho đề sang định dạng arena (bản ĐẦY ĐỦ, còn đáp án).
  * Luôn giữ field `type` (kể cả abcd) vì arena trộn nhiều dạng trong một mảng.
  */
-const toArenaQuestionServer = (q, index, cfg) => {
+const toArenaQuestionServer = (q, cfg) => {
     const type = q.type || 'abcd';
     const isImage = q.inputMode === 'image';
     const base = {
         type,
         questionText: (q.questionText || '').trim() || (isImage ? 'Xem đề trong ảnh' : ''),
         questionImage: q.questionImage || '',
-        points: arenaPointsFor(index, cfg),
-        seconds: arenaSecondsFor(index, cfg),
+        points: arenaPointsFor(type, cfg),
+        seconds: arenaSecondsFor(type, cfg),
     };
 
     if (type === 'true_false') {
@@ -1163,28 +1243,10 @@ exports.startArenaMatch = moneyFunction(async ({ uid, body, db }) => {
         throw new Error(`Cần ít nhất ${minPlayers} người mới bắt đầu được`);
     }
 
-    // ===== Random đề theo cơ cấu: 3 ABCD + 1 đúng-sai + 1 điền =====
+    // ===== Random đề theo cơ cấu admin cài (mặc định 3 ABCD + 1 đúng-sai + 1 điền) =====
     const folderId = room.folderId || null;
     const bankSnap = await db.collection('questionBank').where('folderId', '==', folderId).get();
-
-    const byType = { abcd: [], true_false: [], short_answer: [] };
-    bankSnap.docs.forEach((d) => {
-        const q = d.data();
-        const type = q.type || 'abcd';
-        if (byType[type]) byType[type].push(q);
-    });
-
-    const abcdCount = Number(cfg.abcdCount ?? 3);
-    if (byType.abcd.length < abcdCount || byType.true_false.length < 1 || byType.short_answer.length < 1) {
-        throw new Error('Thư mục đề không đủ câu hỏi theo cơ cấu (3 trắc nghiệm + 1 đúng-sai + 1 điền đáp án)');
-    }
-
-    const picked = [
-        ...shuffleArena(byType.abcd).slice(0, abcdCount),
-        shuffleArena(byType.true_false)[0],
-        shuffleArena(byType.short_answer)[0],
-    ];
-    const questions = picked.map((q, i) => toArenaQuestionServer(q, i, cfg));
+    const questions = pickArenaQuestions(bankSnap.docs, cfg);
 
     // ===== Ghi dữ liệu =====
     const sessionId = rtdb.ref('arena_sessions').push().key;
@@ -1298,25 +1360,7 @@ exports.startArenaPractice = moneyFunction(async ({ uid, body, db }) => {
     // ===== Random đề theo đúng cơ cấu của trận thi đấu =====
     const folderId = room.folderId || null;
     const bankSnap = await db.collection('questionBank').where('folderId', '==', folderId).get();
-
-    const byType = { abcd: [], true_false: [], short_answer: [] };
-    bankSnap.docs.forEach((d) => {
-        const q = d.data();
-        const type = q.type || 'abcd';
-        if (byType[type]) byType[type].push(q);
-    });
-
-    const abcdCount = Number(cfg.abcdCount ?? 3);
-    if (byType.abcd.length < abcdCount || byType.true_false.length < 1 || byType.short_answer.length < 1) {
-        throw new Error('Thư mục đề không đủ câu hỏi theo cơ cấu');
-    }
-
-    const picked = [
-        ...shuffleArena(byType.abcd).slice(0, abcdCount),
-        shuffleArena(byType.true_false)[0],
-        shuffleArena(byType.short_answer)[0],
-    ];
-    const questions = picked.map((q, i) => toArenaQuestionServer(q, i, cfg));
+    const questions = pickArenaQuestions(bankSnap.docs, cfg);
 
     // ===== Ghi phiên =====
     const sessionId = rtdb.ref('arena_sessions').push().key;
@@ -1636,6 +1680,7 @@ exports.finalizeArenaMatch = moneyFunction(async ({ uid, body, db }) => {
     ranking.sort(
         (a, b) => b.score - a.score || a.totalMs - b.totalMs || a.uid.localeCompare(b.uid)
     );
+    applyArenaLuckyDraw(ranking, sessionId);
     ranking.forEach((r, i) => {
         r.rank = i + 1;
     });
